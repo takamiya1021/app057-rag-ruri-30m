@@ -1,0 +1,45 @@
+{
+  "name": "kuro-rag-ruri-30m",
+  "version": "2.0.0",
+  "description": "クロラグ Ruri-30m版 - 日本語特化RAGシステム（MCP + Web UI + CLI）",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --port 3057",
+    "build": "next build",
+    "start": "next start --port 3057",
+    "mcp": "tsx mcp/index.ts",
+    "lint": "eslint",
+    "cli": "tsx cli/rag-cli.ts",
+    "cli:ask": "tsx cli/rag-cli.ts ask",
+    "cli:add": "tsx cli/rag-cli.ts add",
+    "cli:list": "tsx cli/rag-cli.ts list",
+    "cli:status": "tsx cli/rag-cli.ts status"
+  },
+  "dependencies": {
+    "@ai-sdk/google": "^3.0.34",
+    "@ai-sdk/react": "^3.0.107",
+    "@huggingface/transformers": "^3.8.1",
+    "@modelcontextprotocol/sdk": "^1.27.1",
+    "@tailwindcss/postcss": "^4.2.1",
+    "ai": "^6.0.105",
+    "better-sqlite3": "^12.6.2",
+    "next": "16.1.6",
+    "pdf-parse": "^2.4.5",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "sqlite-vec": "^0.1.7-alpha.2",
+    "tailwindcss": "^4.2.1",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.0.0",
+    "@types/pdf-parse": "^1.1.4",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.1.6",
+    "tsx": "^4.21.0",
+    "typescript": "^5.7.0"
+  }
+}
