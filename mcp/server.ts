@@ -52,26 +52,56 @@ export function createServer(): McpServer {
     }
   }, 5000); // サーバー起動から5秒後に実行（起動を妨げないように）
 
+  // --- バックグラウンドインデックス処理 ---
+
+  /** エンベディング生成 + DB保存をバックグラウンドで実行 */
+  function indexInBackground(
+    source: string,
+    textChunks: string[],
+    filePath: string,
+    mtimeMs: number,
+    metadata?: Record<string, string>,
+  ): void {
+    (async () => {
+      try {
+        // 既存ソースがあれば削除（upsert）
+        removeSource(source);
+
+        const embeddings = await generateEmbeddings(textChunks, "RETRIEVAL_DOCUMENT");
+
+        const chunks = textChunks.map((text, i) => ({
+          text,
+          source,
+          chunkIndex: i,
+          metadata,
+        }));
+        addChunks(chunks, embeddings);
+        upsertSourceFile(source, filePath, mtimeMs);
+
+        console.error(`[index] "${source}" のインデックス完了（${textChunks.length}チャンク）`);
+      } catch (e) {
+        console.error(`[index] "${source}" のインデックス失敗: ${e}`);
+      }
+    })();
+  }
+
   // --- ツール登録 ---
 
-  // 1. ファイルからドキュメントをインデックス
+  // 1. ファイルからドキュメントをインデックス（バックグラウンド処理）
   server.tool(
     "add_document",
-    "ファイルパスからドキュメントを読み込み、RAGインデックスに追加する",
+    "ファイルパスからドキュメントを読み込み、RAGインデックスに追加する。即座に受付応答し、エンベディング生成とインデックス追加はバックグラウンドで実行される。",
     {
       filePath: z.string().describe("インデックスするファイルのパス（.txt, .md, .pdf, .json対応）"),
       metadata: z.record(z.string()).optional().describe("任意のメタデータ"),
     },
     async ({ filePath, metadata }) => {
       try {
+        // ファイル読み込みとチャンク分割だけ先にやる（軽量）
         const doc = await loadDocument(filePath);
         const resolvedPath = path.resolve(filePath);
         const stat = await fs.stat(resolvedPath);
 
-        // 既存ソースがあれば削除（upsert）
-        removeSource(doc.source);
-
-        // 形式に応じたチャンク分割
         const textChunks =
           doc.format === "md" ? splitMarkdown(doc.text) : splitText(doc.text);
 
@@ -81,27 +111,14 @@ export function createServer(): McpServer {
           };
         }
 
-        // Embedding生成
-        const embeddings = await generateEmbeddings(textChunks, "RETRIEVAL_DOCUMENT");
-
-        // DB保存
-        const chunks = textChunks.map((text, i) => ({
-          text,
-          source: doc.source,
-          chunkIndex: i,
-          metadata,
-        }));
-        const ids = addChunks(chunks, embeddings);
-
-        // ファイル情報を記録（起動時チェック用）
-        upsertSourceFile(doc.source, resolvedPath, stat.mtimeMs);
-
+        // エンベディング生成 + DB保存はバックグラウンドで実行
+        indexInBackground(doc.source, textChunks, resolvedPath, stat.mtimeMs, metadata);
 
         return {
           content: [
             {
               type: "text",
-              text: `ドキュメント "${doc.source}" を追加しました（${ids.length}チャンク）`,
+              text: `ドキュメント "${doc.source}" を受け付けました（${textChunks.length}チャンク、バックグラウンドでインデックス中）`,
             },
           ],
         };
@@ -295,10 +312,10 @@ export function createServer(): McpServer {
     },
   );
 
-  // 6. ディレクトリ一括インデックス
+  // 6. ディレクトリ一括インデックス（バックグラウンド処理）
   server.tool(
     "add_directory",
-    "ディレクトリ内の対応ファイル(.md, .txt, .pdf, .json)を再帰的にインデックスする",
+    "ディレクトリ内の対応ファイル(.md, .txt, .pdf, .json)を再帰的にインデックスする。即座に受付応答し、インデックス処理はバックグラウンドで実行される。",
     {
       dirPath: z.string().describe("インデックスするディレクトリのパス"),
       skipDirs: z
@@ -309,7 +326,6 @@ export function createServer(): McpServer {
     },
     async ({ dirPath, skipDirs }) => {
       const SUPPORTED_EXTS = new Set([".md", ".txt", ".pdf", ".json"]);
-      const results: { file: string; chunks: number; error?: string }[] = [];
 
       // 再帰的にファイル収集（シンボリックリンク対応）
       async function collectFiles(dir: string): Promise<string[]> {
@@ -323,7 +339,6 @@ export function createServer(): McpServer {
         for (const entry of entries) {
           if (skipDirs.includes(entry.name)) continue;
           const fullPath = path.join(dir, entry.name);
-          // シンボリックリンクの実体を確認
           let stat;
           try {
             stat = await fs.stat(fullPath);
@@ -344,6 +359,7 @@ export function createServer(): McpServer {
       }
 
       try {
+        // ファイル収集だけ先にやる（軽量）
         const files = await collectFiles(dirPath);
 
         if (files.length === 0) {
@@ -352,65 +368,47 @@ export function createServer(): McpServer {
           };
         }
 
-        // 1ファイルずつ順次処理
-        for (const filePath of files) {
-          try {
-            const doc = await loadDocument(filePath);
-            const resolvedFilePath = path.resolve(filePath);
-            const fileStat = await fs.stat(resolvedFilePath);
-            const relativePath = path.relative(dirPath, filePath);
+        // バックグラウンドで全ファイルをインデックス
+        (async () => {
+          let successCount = 0;
+          let errorCount = 0;
+          for (const filePath of files) {
+            try {
+              const doc = await loadDocument(filePath);
+              const resolvedFilePath = path.resolve(filePath);
+              const fileStat = await fs.stat(resolvedFilePath);
+              const relativePath = path.relative(dirPath, filePath);
 
-            // 既存ソースがあれば削除（upsert）
-            removeSource(relativePath);
+              removeSource(relativePath);
 
-            const textChunks =
-              doc.format === "md" ? splitMarkdown(doc.text) : splitText(doc.text);
+              const textChunks =
+                doc.format === "md" ? splitMarkdown(doc.text) : splitText(doc.text);
 
-            if (textChunks.length === 0) {
-              results.push({ file: filePath, chunks: 0 });
-              continue;
+              if (textChunks.length === 0) continue;
+
+              const embeddings = await generateEmbeddings(textChunks, "RETRIEVAL_DOCUMENT");
+              const chunks = textChunks.map((text, i) => ({
+                text,
+                source: relativePath,
+                chunkIndex: i,
+              }));
+              addChunks(chunks, embeddings);
+              upsertSourceFile(relativePath, resolvedFilePath, fileStat.mtimeMs);
+              successCount++;
+            } catch (error) {
+              errorCount++;
+              const msg = error instanceof Error ? error.message : String(error);
+              console.error(`[index] ${path.relative(dirPath, filePath)}: ${msg}`);
             }
-
-            const embeddings = await generateEmbeddings(textChunks, "RETRIEVAL_DOCUMENT");
-            const chunks = textChunks.map((text, i) => ({
-              text,
-              source: relativePath,
-              chunkIndex: i,
-            }));
-            const ids = addChunks(chunks, embeddings);
-
-            // ファイル情報を記録（起動時チェック用）
-            upsertSourceFile(relativePath, resolvedFilePath, fileStat.mtimeMs);
-
-            results.push({ file: relativePath, chunks: ids.length });
-          } catch (error) {
-            const msg = error instanceof Error ? error.message : String(error);
-            results.push({ file: path.relative(dirPath, filePath), chunks: 0, error: msg });
           }
-        }
-
-
-        const success = results.filter((r) => r.chunks > 0);
-        const failed = results.filter((r) => r.error);
-        const empty = results.filter((r) => r.chunks === 0 && !r.error);
-        const totalChunks = success.reduce((sum, r) => sum + r.chunks, 0);
-
-        const summary = [
-          `完了: ${files.length}ファイル処理`,
-          `成功: ${success.length}ファイル（${totalChunks}チャンク）`,
-          empty.length > 0 ? `空ファイル: ${empty.length}` : null,
-          failed.length > 0 ? `エラー: ${failed.length}` : null,
-        ]
-          .filter(Boolean)
-          .join("\n");
-
-        const detail =
-          failed.length > 0
-            ? "\n\nエラー詳細:\n" + failed.map((r) => `- ${r.file}: ${r.error}`).join("\n")
-            : "";
+          console.error(`[index] ディレクトリ "${dirPath}" のインデックス完了（成功: ${successCount}, エラー: ${errorCount}）`);
+        })();
 
         return {
-          content: [{ type: "text", text: summary + detail }],
+          content: [{
+            type: "text",
+            text: `${files.length}ファイルを受け付けました。バックグラウンドでインデックス中です。`,
+          }],
         };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
