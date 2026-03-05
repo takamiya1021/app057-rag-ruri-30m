@@ -31,6 +31,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [savedApiKey, setSavedApiKey] = useState("");
   const [dbPath, setDbPath] = useState("");
   const [savedDbPath, setSavedDbPath] = useState("");
+  const [linkMode, setLinkMode] = useState("modal");
 
   useEffect(() => {
     if (!isOpen) return;
@@ -40,6 +41,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     const path = getCookie("rag_db_path");
     setSavedDbPath(path);
     setDbPath(path);
+    setLinkMode(getCookie("link_mode") || "modal");
   }, [isOpen]);
 
   const handleSave = () => {
@@ -56,6 +58,8 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       deleteCookie("rag_db_path");
       setSavedDbPath("");
     }
+    // リンク表示方法を保存
+    setCookie("link_mode", linkMode);
     onClose();
   };
 
@@ -139,6 +143,45 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
               <p className="text-gray-600 text-xs mt-1">
                 デフォルト: {DEFAULT_DB_PATH}
               </p>
+            </div>
+
+            {/* リンク表示方法 */}
+            <div>
+              <h3 className="text-sm font-semibold text-gray-300 mb-2">
+                ソースリンクの開き方
+              </h3>
+              <p className="text-gray-500 text-xs mb-2">
+                検索結果のファイル名をクリックした時の動作。
+              </p>
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="linkMode"
+                    value="modal"
+                    checked={linkMode === "modal"}
+                    onChange={(e) => setLinkMode(e.target.value)}
+                    className="accent-cyan-500"
+                  />
+                  <span className="text-sm text-gray-300">モーダルで表示（API消費なし）</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="linkMode"
+                    value="vscode"
+                    checked={linkMode === "vscode"}
+                    onChange={(e) => setLinkMode(e.target.value)}
+                    className="accent-cyan-500"
+                  />
+                  <span className="text-sm text-gray-300">VSCodeで開く</span>
+                </label>
+              </div>
+              {linkMode === "vscode" && (
+                <p className="text-gray-500 text-xs mt-2">
+                  事前にVSCodeを開いておく必要があります。未起動時はモーダル表示にフォールバックします。
+                </p>
+              )}
             </div>
           </div>
 

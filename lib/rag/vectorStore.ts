@@ -361,6 +361,57 @@ export function listSources(): SourceInfo[] {
   }));
 }
 
+/** ソースの全チャンクをテキスト順に取得 */
+export function getChunksBySource(source: string): StoredChunk[] {
+  const database = getDb();
+  const rows = database
+    .prepare(
+      `SELECT id, source, chunk_text, chunk_index, metadata, created_at
+       FROM chunks WHERE source = ?
+       ORDER BY chunk_index ASC`,
+    )
+    .all(source) as Array<{
+    id: number;
+    source: string;
+    chunk_text: string;
+    chunk_index: number;
+    metadata: string | null;
+    created_at: string;
+  }>;
+
+  return rows.map((row) => ({
+    id: row.id,
+    text: row.chunk_text,
+    source: row.source,
+    chunkIndex: row.chunk_index,
+    metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
+    createdAt: row.created_at,
+  }));
+}
+
+/** ソース名を部分一致で検索 */
+export function findSources(keyword: string): SourceInfo[] {
+  const database = getDb();
+  const rows = database
+    .prepare(
+      `SELECT source, COUNT(*) as chunk_count, MIN(created_at) as created_at
+       FROM chunks WHERE source LIKE ?
+       GROUP BY source
+       ORDER BY source ASC`,
+    )
+    .all(`%${keyword}%`) as Array<{
+    source: string;
+    chunk_count: number;
+    created_at: string;
+  }>;
+
+  return rows.map((row) => ({
+    source: row.source,
+    chunkCount: row.chunk_count,
+    createdAt: row.created_at,
+  }));
+}
+
 /** ソースの全チャンクを削除 */
 export function removeSource(source: string): number {
   const database = getDb();
