@@ -34,24 +34,67 @@ export function createServer(): McpServer {
   // DB初期化
   initDb();
 
-  // SoftMatchaインデックスの定期チェック（起動時にバックグラウンド実行）
-  // 前回構築から24時間以上経過 & チャンクが存在する場合に自動再構築
-  setTimeout(async () => {
-    try {
-      const chunks = getAllChunks();
-      if (chunks.length > 0 && isIndexStale()) {
-        console.error("[softmatcha] インデックスが古いため自動再構築を開始します...");
-        const result = await buildSoftMatchaIndex(chunks);
-        if (result.ok) {
-          console.error(`[softmatcha] 自動再構築完了（${chunks.length}チャンク, ${result.numTokens}トークン）`);
-        } else {
-          console.error(`[softmatcha] 自動再構築失敗: ${result.error}`);
+  // --- 検索時バックグラウンド更新 ---
+  // 最終チェック時刻を記録（検索のたびにチェックしないようにする）
+  let lastUpdateCheckMs = 0;
+  const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1時間
+  let updateRunning = false;
+
+  /** 検索時にバックグラウンドで更新チェック+更新を実行（検索をブロックしない） */
+  function triggerBackgroundUpdate(): void {
+    const now = Date.now();
+    if (updateRunning || now - lastUpdateCheckMs < UPDATE_CHECK_INTERVAL_MS) return;
+    lastUpdateCheckMs = now;
+    updateRunning = true;
+
+    (async () => {
+      try {
+        // 1. ruri+BM25の差分更新
+        const { stale, deleted } = getStaleOrDeletedSources();
+        if (stale.length > 0 || deleted.length > 0) {
+          console.error(`[auto-update] ruri+BM25差分更新開始（更新: ${stale.length}, 削除: ${deleted.length}）`);
+          for (const source of deleted) {
+            removeSource(source);
+          }
+          for (const { source, filePath } of stale) {
+            try {
+              const doc = await loadDocument(filePath);
+              const stat = await fs.stat(filePath);
+              removeSource(source);
+              const textChunks = doc.format === "md" ? splitMarkdown(doc.text) : splitText(doc.text);
+              if (textChunks.length === 0) continue;
+              const embeddings = await generateEmbeddings(textChunks, "RETRIEVAL_DOCUMENT");
+              const chunks = textChunks.map((text, i) => ({ text, source, chunkIndex: i }));
+              addChunks(chunks, embeddings);
+              upsertSourceFile(source, filePath, stat.mtimeMs);
+            } catch (e) {
+              console.error(`[auto-update] ${source}: ${e}`);
+            }
+          }
+          console.error("[auto-update] ruri+BM25差分更新完了");
         }
+
+        // 2. SoftMatcha 2の再構築（ruri+BM25に変更があった場合、または24時間経過）
+        const needsSoftmatchaRebuild = stale.length > 0 || deleted.length > 0 || isIndexStale();
+        if (needsSoftmatchaRebuild) {
+          const allChunks = getAllChunks();
+          if (allChunks.length > 0) {
+            console.error("[auto-update] SoftMatcha 2再構築開始");
+            const result = await buildSoftMatchaIndex(allChunks);
+            if (result.ok) {
+              console.error(`[auto-update] SoftMatcha 2再構築完了（${result.numTokens}トークン）`);
+            } else {
+              console.error(`[auto-update] SoftMatcha 2再構築失敗: ${result.error}`);
+            }
+          }
+        }
+      } catch (e) {
+        console.error(`[auto-update] エラー: ${e}`);
+      } finally {
+        updateRunning = false;
       }
-    } catch (e) {
-      console.error(`[softmatcha] 自動再構築エラー: ${e}`);
-    }
-  }, 5000); // サーバー起動から5秒後に実行（起動を妨げないように）
+    })();
+  }
 
   // --- ツール登録 ---
 
@@ -164,6 +207,9 @@ export function createServer(): McpServer {
     },
     async ({ query, topK }) => {
       try {
+        // バックグラウンドで更新チェック（検索をブロックしない）
+        triggerBackgroundUpdate();
+
         // ベクトル検索用のエンベディング生成
         const queryEmbedding = await generateEmbedding(query, "RETRIEVAL_QUERY");
 
