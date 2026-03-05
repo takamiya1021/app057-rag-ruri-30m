@@ -17,6 +17,9 @@ const DEFAULT_DATA_DIR = path.join(
   ".local/share/rag-mcp-ruri-30m/softmatcha",
 );
 
+// インデックス自動再構築の間隔（24時間）
+const REBUILD_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
 /** SoftMatcha 2の検索結果 */
 export interface SoftMatchaResult {
   pattern: string;
@@ -231,6 +234,10 @@ export async function buildSoftMatchaIndex(
     map_path: mapPath,
   }) as { ok: boolean; num_tokens?: number; error?: string };
 
+  if (result.ok) {
+    recordBuildTime();
+  }
+
   return {
     ok: result.ok,
     numTokens: result.num_tokens,
@@ -288,9 +295,39 @@ export async function searchSoftMatcha(
   return response.results || [];
 }
 
+/** 最終構築日時ファイルのパス */
+function getLastBuildPath(): string {
+  return path.join(getDataDir(), "last_build");
+}
+
+/** 最終構築日時を記録 */
+function recordBuildTime(): void {
+  const dir = getDataDir();
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(getLastBuildPath(), new Date().toISOString());
+}
+
+/** 最終構築日時を取得（なければnull） */
+function getLastBuildTime(): Date | null {
+  const p = getLastBuildPath();
+  if (!fs.existsSync(p)) return null;
+  try {
+    return new Date(fs.readFileSync(p, "utf-8").trim());
+  } catch {
+    return null;
+  }
+}
+
 /** インデックスが存在するか */
 export function hasSoftMatchaIndex(): boolean {
   return fs.existsSync(path.join(getIndexPath(), "metadata.bin"));
+}
+
+/** インデックスが古い（前回構築から24時間以上経過）か */
+export function isIndexStale(): boolean {
+  const lastBuild = getLastBuildTime();
+  if (!lastBuild) return true; // 一度も構築されていない
+  return Date.now() - lastBuild.getTime() > REBUILD_INTERVAL_MS;
 }
 
 /** SoftMatcha 2の状態を取得 */

@@ -20,6 +20,7 @@ import {
   searchSoftMatcha,
   buildSoftMatchaIndex,
   hasSoftMatchaIndex,
+  isIndexStale,
   getSoftMatchaStatus,
 } from "../lib/rag/softmatcha";
 
@@ -31,6 +32,25 @@ export function createServer(): McpServer {
 
   // DB初期化
   initDb();
+
+  // SoftMatchaインデックスの定期チェック（起動時にバックグラウンド実行）
+  // 前回構築から24時間以上経過 & チャンクが存在する場合に自動再構築
+  setTimeout(async () => {
+    try {
+      const chunks = getAllChunks();
+      if (chunks.length > 0 && isIndexStale()) {
+        console.error("[softmatcha] インデックスが古いため自動再構築を開始します...");
+        const result = await buildSoftMatchaIndex(chunks);
+        if (result.ok) {
+          console.error(`[softmatcha] 自動再構築完了（${chunks.length}チャンク, ${result.numTokens}トークン）`);
+        } else {
+          console.error(`[softmatcha] 自動再構築失敗: ${result.error}`);
+        }
+      }
+    } catch (e) {
+      console.error(`[softmatcha] 自動再構築エラー: ${e}`);
+    }
+  }, 5000); // サーバー起動から5秒後に実行（起動を妨げないように）
 
   // --- ツール登録 ---
 
