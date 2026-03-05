@@ -147,12 +147,17 @@ async function ensureProcess(): Promise<void> {
 }
 
 function handleResponse(line: string): void {
+  // SoftMatchaライブラリが出すデバッグ行（"loading begin..."、"#Search = ..."等）を無視
+  if (!line.startsWith("{")) return;
+
   if (pendingResolve) {
     try {
       const result = JSON.parse(line);
       pendingResolve(result);
     } catch {
-      pendingResolve({ error: `JSONパースエラー: ${line}` });
+      // JSONパース失敗でもresolveを消費しない（次の正規JSONを待つ）
+      console.error(`[softmatcha] 非JSONレスポンスをスキップ: ${line.slice(0, 100)}`);
+      return;
     }
     pendingResolve = null;
   }

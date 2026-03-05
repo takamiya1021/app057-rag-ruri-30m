@@ -287,8 +287,18 @@ def main():
     bridge = SoftMatchaBridge()
     logger.info("SoftMatcha 2 ブリッジプロセス開始")
 
+    # SoftMatchaライブラリがstdoutに直接書き出す問題への対策:
+    # - Python側: "loading begin...", "loading finished" 等
+    # - Rust/C拡張側: "#Search = ..." 等（fd 1に直接write）
+    # fd 1（stdout）をstderr（fd 2）にリダイレクトし、
+    # JSON通信用に元のstdoutのfdを保持する。
+    json_fd = os.dup(1)        # 元のstdout fdを複製
+    os.dup2(2, 1)              # fd 1をstderr（fd 2）に向ける
+    json_out = os.fdopen(json_fd, "w")  # JSON出力用のファイルオブジェクト
+
     # 起動メッセージ
-    print(json.dumps({"status": "ready"}), flush=True)
+    json_out.write(json.dumps({"status": "ready"}) + "\n")
+    json_out.flush()
 
     for line in sys.stdin:
         line = line.strip()
@@ -302,7 +312,8 @@ def main():
             continue
 
         result = bridge.handle_command(cmd)
-        print(json.dumps(result, ensure_ascii=False), flush=True)
+        json_out.write(json.dumps(result, ensure_ascii=False) + "\n")
+        json_out.flush()
 
         if cmd.get("action") == "shutdown":
             break
