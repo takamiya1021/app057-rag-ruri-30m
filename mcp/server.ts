@@ -10,6 +10,8 @@ import {
   listSources,
   removeSource,
   getStatus,
+  upsertSourceFile,
+  getStaleOrDeletedSources,
 } from "../lib/rag/vectorStore";
 import { splitText, splitMarkdown } from "../lib/rag/chunker";
 import { loadDocument } from "../lib/rag/documentLoader";
@@ -36,6 +38,11 @@ export function createServer(): McpServer {
     async ({ filePath, metadata }) => {
       try {
         const doc = await loadDocument(filePath);
+        const resolvedPath = path.resolve(filePath);
+        const stat = await fs.stat(resolvedPath);
+
+        // 既存ソースがあれば削除（upsert）
+        removeSource(doc.source);
 
         // 形式に応じたチャンク分割
         const textChunks =
@@ -58,6 +65,9 @@ export function createServer(): McpServer {
           metadata,
         }));
         const ids = addChunks(chunks, embeddings);
+
+        // ファイル情報を記録（起動時チェック用）
+        upsertSourceFile(doc.source, resolvedPath, stat.mtimeMs);
 
         return {
           content: [
@@ -297,6 +307,13 @@ export function createServer(): McpServer {
         for (const filePath of files) {
           try {
             const doc = await loadDocument(filePath);
+            const resolvedFilePath = path.resolve(filePath);
+            const fileStat = await fs.stat(resolvedFilePath);
+            const relativePath = path.relative(dirPath, filePath);
+
+            // 既存ソースがあれば削除（upsert）
+            removeSource(relativePath);
+
             const textChunks =
               doc.format === "md" ? splitMarkdown(doc.text) : splitText(doc.text);
 
@@ -306,14 +323,16 @@ export function createServer(): McpServer {
             }
 
             const embeddings = await generateEmbeddings(textChunks, "RETRIEVAL_DOCUMENT");
-            // ソース名をディレクトリからの相対パスにする
-            const relativePath = path.relative(dirPath, filePath);
             const chunks = textChunks.map((text, i) => ({
               text,
               source: relativePath,
               chunkIndex: i,
             }));
             const ids = addChunks(chunks, embeddings);
+
+            // ファイル情報を記録（起動時チェック用）
+            upsertSourceFile(relativePath, resolvedFilePath, fileStat.mtimeMs);
+
             results.push({ file: relativePath, chunks: ids.length });
           } catch (error) {
             const msg = error instanceof Error ? error.message : String(error);
@@ -342,6 +361,118 @@ export function createServer(): McpServer {
 
         return {
           content: [{ type: "text", text: summary + detail }],
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: "text", text: `エラー: ${message}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  // 7. インデックス更新チェック（起動時に呼ぶ想定）
+  server.tool(
+    "check_updates",
+    "インデックス済みファイルの更新・削除を検出する。実際の更新はsync_updatesで行う。",
+    {},
+    async () => {
+      try {
+        const { stale, deleted } = getStaleOrDeletedSources();
+
+        if (stale.length === 0 && deleted.length === 0) {
+          return {
+            content: [{ type: "text", text: "すべてのインデックスは最新です" }],
+          };
+        }
+
+        const lines: string[] = [];
+        if (stale.length > 0) {
+          lines.push(`更新されたファイル（${stale.length}件）:`);
+          for (const s of stale) {
+            lines.push(`  - ${s.source}`);
+          }
+        }
+        if (deleted.length > 0) {
+          lines.push(`削除されたファイル（${deleted.length}件）:`);
+          for (const d of deleted) {
+            lines.push(`  - ${d}`);
+          }
+        }
+        lines.push("");
+        lines.push("sync_updates を実行するとインデックスを更新できます。");
+
+        return {
+          content: [{ type: "text", text: lines.join("\n") }],
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: "text", text: `エラー: ${message}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  // 8. インデックス同期（更新されたファイルを再インデックス、削除されたファイルをインデックスから除去）
+  server.tool(
+    "sync_updates",
+    "check_updatesで検出された変更をインデックスに反映する。更新ファイルは再インデックス、削除ファイルはインデックスから除去する。",
+    {},
+    async () => {
+      try {
+        const { stale, deleted } = getStaleOrDeletedSources();
+
+        if (stale.length === 0 && deleted.length === 0) {
+          return {
+            content: [{ type: "text", text: "すべてのインデックスは最新です。更新不要。" }],
+          };
+        }
+
+        const results: string[] = [];
+
+        // 削除されたファイルをインデックスから除去
+        for (const source of deleted) {
+          const count = removeSource(source);
+          results.push(`削除: ${source}（${count}チャンク除去）`);
+        }
+
+        // 更新されたファイルを再インデックス
+        for (const { source, filePath } of stale) {
+          try {
+            const doc = await loadDocument(filePath);
+            const stat = await fs.stat(filePath);
+
+            // 古いインデックスを削除
+            removeSource(source);
+
+            const textChunks =
+              doc.format === "md" ? splitMarkdown(doc.text) : splitText(doc.text);
+
+            if (textChunks.length === 0) {
+              results.push(`スキップ: ${source}（テキストなし）`);
+              continue;
+            }
+
+            const embeddings = await generateEmbeddings(textChunks, "RETRIEVAL_DOCUMENT");
+            const chunks = textChunks.map((text, i) => ({
+              text,
+              source,
+              chunkIndex: i,
+            }));
+            const ids = addChunks(chunks, embeddings);
+            upsertSourceFile(source, filePath, stat.mtimeMs);
+            results.push(`更新: ${source}（${ids.length}チャンク）`);
+          } catch (error) {
+            const msg = error instanceof Error ? error.message : String(error);
+            results.push(`エラー: ${source} - ${msg}`);
+          }
+        }
+
+        return {
+          content: [{ type: "text", text: results.join("\n") }],
         };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

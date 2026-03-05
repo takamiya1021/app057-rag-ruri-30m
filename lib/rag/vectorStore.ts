@@ -83,6 +83,16 @@ export function initDb(): Database.Database {
     );
   `);
 
+  // ソースファイル管理テーブル（起動時チェック用）
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS source_files (
+      source TEXT PRIMARY KEY,
+      file_path TEXT NOT NULL,
+      mtime_ms INTEGER NOT NULL,
+      indexed_at TEXT DEFAULT (datetime('now'))
+    );
+  `);
+
   // 既存チャンクがFTS5に未登録の場合、バックフィル
   // ※ content-sync FTS5ではCOUNT(*)がcontentテーブルの行数を返すため、
   //    実際のインデックス状態はfts_chunks_dataの行数で判定する
@@ -433,6 +443,7 @@ export function removeSource(source: string): number {
       deleteFts.run(row.id, row.chunk_text);
     }
     database.prepare(`DELETE FROM chunks WHERE source = ?`).run(source);
+    database.prepare(`DELETE FROM source_files WHERE source = ?`).run(source);
   });
 
   transaction();
@@ -464,6 +475,52 @@ export function getStatus(): IndexStatus {
     dbSizeBytes,
     sources,
   };
+}
+
+/** ソースのファイル情報を記録（起動時チェック用） */
+export function upsertSourceFile(source: string, filePath: string, mtimeMs: number): void {
+  const database = getDb();
+  database.prepare(`
+    INSERT INTO source_files (source, file_path, mtime_ms)
+    VALUES (?, ?, ?)
+    ON CONFLICT(source) DO UPDATE SET
+      file_path = excluded.file_path,
+      mtime_ms = excluded.mtime_ms,
+      indexed_at = datetime('now')
+  `).run(source, filePath, mtimeMs);
+}
+
+/** ソースのファイル情報を削除 */
+export function removeSourceFile(source: string): void {
+  const database = getDb();
+  database.prepare(`DELETE FROM source_files WHERE source = ?`).run(source);
+}
+
+/** 更新が必要なソース一覧を取得（ファイルのmtimeがDB記録より新しい、またはファイルが消えた） */
+export function getStaleOrDeletedSources(): { stale: Array<{ source: string; filePath: string }>; deleted: string[] } {
+  const database = getDb();
+  const rows = database.prepare(`SELECT source, file_path, mtime_ms FROM source_files`).all() as Array<{
+    source: string;
+    file_path: string;
+    mtime_ms: number;
+  }>;
+
+  const stale: Array<{ source: string; filePath: string }> = [];
+  const deleted: string[] = [];
+
+  for (const row of rows) {
+    try {
+      const stat = fs.statSync(row.file_path);
+      if (stat.mtimeMs > row.mtime_ms) {
+        stale.push({ source: row.source, filePath: row.file_path });
+      }
+    } catch {
+      // ファイルが存在しない
+      deleted.push(row.source);
+    }
+  }
+
+  return { stale, deleted };
 }
 
 /** DB接続をクローズ */
