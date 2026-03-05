@@ -18,3 +18,7 @@ out/
 npm-debug.log*
 .vercel
 *.log
+
+# SoftMatcha 2（外部クローン + ビルドが必要）
+softmatcha/*
+!softmatcha/bridge.py

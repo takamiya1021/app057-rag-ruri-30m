@@ -12,9 +12,16 @@ import {
   getStatus,
   upsertSourceFile,
   getStaleOrDeletedSources,
+  getAllChunks,
 } from "../lib/rag/vectorStore";
 import { splitText, splitMarkdown } from "../lib/rag/chunker";
 import { loadDocument } from "../lib/rag/documentLoader";
+import {
+  searchSoftMatcha,
+  buildSoftMatchaIndex,
+  hasSoftMatchaIndex,
+  getSoftMatchaStatus,
+} from "../lib/rag/softmatcha";
 
 export function createServer(): McpServer {
   const server = new McpServer({
@@ -132,18 +139,38 @@ export function createServer(): McpServer {
     },
   );
 
-  // 3. セマンティック検索
+  // 3. トリプルハイブリッド検索（ベクトル + BM25 + SoftMatcha構造検索）
   server.tool(
     "search",
-    "RAGインデックスをセマンティック検索し、関連するチャンクを返す",
+    "RAGインデックスをトリプルハイブリッド検索（ベクトル + BM25 + 構造検索）し、関連するチャンクを返す",
     {
       query: z.string().describe("検索クエリ"),
       topK: z.number().optional().default(5).describe("返す結果の最大数"),
     },
     async ({ query, topK }) => {
       try {
+        // ベクトル検索用のエンベディング生成
         const queryEmbedding = await generateEmbedding(query, "RETRIEVAL_QUERY");
-        const results = hybridSearch(queryEmbedding, query, topK);
+
+        // SoftMatcha 2 構造検索（インデックスがあれば並行実行）
+        let softmatchaResults: Array<{ score: number; chunk_ids: number[] }> | undefined;
+        if (hasSoftMatchaIndex()) {
+          try {
+            const smResults = await searchSoftMatcha(query, topK * 2);
+            if (smResults.length > 0) {
+              softmatchaResults = smResults.map((r) => ({
+                score: r.score,
+                chunk_ids: r.chunk_ids,
+              }));
+            }
+          } catch (e) {
+            // SoftMatcha検索エラーは無視してベクトル+BM25で続行
+            console.error(`[softmatcha] 検索スキップ: ${e}`);
+          }
+        }
+
+        // トリプルハイブリッド検索（RRF統合）
+        const results = hybridSearch(queryEmbedding, query, topK, softmatchaResults);
 
         if (results.length === 0) {
           return {
@@ -157,6 +184,7 @@ export function createServer(): McpServer {
           score: Math.round(r.score * 10000) / 10000,
           vectorRank: r.vectorRank,
           bm25Rank: r.bm25Rank,
+          softmatchaRank: r.softmatchaRank,
           text: r.chunk.text,
         }));
 
@@ -484,6 +512,44 @@ export function createServer(): McpServer {
     },
   );
 
+  // 9. SoftMatchaインデックス構築/再構築
+  server.tool(
+    "build_softmatcha_index",
+    "SoftMatcha 2の構造検索インデックスを構築または再構築する。ドキュメント追加後に実行すると検索精度が向上する。",
+    {},
+    async () => {
+      try {
+        const chunks = getAllChunks();
+        if (chunks.length === 0) {
+          return {
+            content: [{ type: "text", text: "インデックスにチャンクがありません。先にドキュメントを追加してください。" }],
+          };
+        }
+
+        const result = await buildSoftMatchaIndex(chunks);
+        if (result.ok) {
+          return {
+            content: [{
+              type: "text",
+              text: `SoftMatcha 2インデックスを構築しました（${chunks.length}チャンク, ${result.numTokens}トークン）`,
+            }],
+          };
+        } else {
+          return {
+            content: [{ type: "text", text: `SoftMatcha 2インデックス構築エラー: ${result.error}` }],
+            isError: true,
+          };
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: "text", text: `エラー: ${message}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+
   // --- リソース登録 ---
 
   // インデックス状態
@@ -493,6 +559,19 @@ export function createServer(): McpServer {
       contents: [
         {
           uri: "rag://status",
+          text: JSON.stringify(status, null, 2),
+        },
+      ],
+    };
+  });
+
+  // SoftMatcha構造検索の状態
+  server.resource("softmatcha-status", "rag://softmatcha-status", async () => {
+    const status = await getSoftMatchaStatus();
+    return {
+      contents: [
+        {
+          uri: "rag://softmatcha-status",
           text: JSON.stringify(status, null, 2),
         },
       ],

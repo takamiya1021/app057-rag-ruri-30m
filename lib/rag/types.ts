@@ -55,7 +55,7 @@ export const RURI_PREFIX: Record<EmbeddingTaskType, string> = {
   RETRIEVAL_DOCUMENT: "検索文書: ",
 };
 
-/** ハイブリッド検索結果（ベクトル + BM25キーワード） */
+/** ハイブリッド検索結果（ベクトル + BM25キーワード + SoftMatcha構造検索） */
 export interface HybridSearchResult {
   chunk: StoredChunk;
   /** RRFスコア（高いほど関連性が高い） */
@@ -64,4 +64,6 @@ export interface HybridSearchResult {
   vectorRank: number | null;
   /** BM25検索での順位（ヒットしなかった場合はnull） */
   bm25Rank: number | null;
+  /** SoftMatcha構造検索での順位（ヒットしなかった場合はnull） */
+  softmatchaRank: number | null;
 }

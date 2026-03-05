@@ -7,6 +7,7 @@ import type { UIMessage } from "ai";
 import { z } from "zod";
 import { generateEmbedding } from "@/lib/rag/embedding";
 import { hybridSearch, initDb, getStatus, getChunksBySource, findSources, listSources } from "@/lib/rag/vectorStore";
+import { searchSoftMatcha, hasSoftMatchaIndex } from "@/lib/rag/softmatcha";
 import { applyDbConfig } from "@/lib/next/applyDbConfig";
 
 const SYSTEM_PROMPT = `あなたは親切なナレッジベースアシスタントです。
@@ -134,7 +135,24 @@ export async function POST(request: Request) {
             const optimizedQuery = await rewriteQuery(google, searchQuery);
             console.log("[searchDocuments] optimized:", optimizedQuery);
             const queryEmbedding = await generateEmbedding(optimizedQuery, "RETRIEVAL_QUERY");
-            const searchResults = hybridSearch(queryEmbedding, optimizedQuery, 5);
+
+            // SoftMatcha構造検索（インデックスがあれば実行）
+            let softmatchaResults: Array<{ score: number; chunk_ids: number[] }> | undefined;
+            if (hasSoftMatchaIndex()) {
+              try {
+                const smResults = await searchSoftMatcha(optimizedQuery, 10);
+                if (smResults.length > 0) {
+                  softmatchaResults = smResults.map((r) => ({
+                    score: r.score,
+                    chunk_ids: r.chunk_ids,
+                  }));
+                }
+              } catch (e) {
+                console.error(`[softmatcha] 検索スキップ: ${e}`);
+              }
+            }
+
+            const searchResults = hybridSearch(queryEmbedding, optimizedQuery, 5, softmatchaResults);
 
             return {
               results: searchResults.map((r, i) => ({

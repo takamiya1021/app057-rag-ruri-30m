@@ -276,11 +276,30 @@ function ftsSearch(
   }));
 }
 
-/** ハイブリッド検索（ベクトル + BM25キーワード検索をRRFで統合） */
+/** SoftMatcha構造検索の結果をチャンクIDごとのランキングに変換 */
+function softmatchaResultsToRanking(
+  results: Array<{ score: number; chunk_ids: number[] }>,
+): Map<number, number> {
+  // スコア順にソートされている前提。チャンクIDごとに最初に登場したランクを記録
+  const rankMap = new Map<number, number>();
+  let rank = 0;
+  for (const result of results) {
+    rank++;
+    for (const chunkId of result.chunk_ids) {
+      if (!rankMap.has(chunkId)) {
+        rankMap.set(chunkId, rank);
+      }
+    }
+  }
+  return rankMap;
+}
+
+/** ハイブリッド検索（ベクトル + BM25キーワード + SoftMatcha構造検索をRRFで統合） */
 export function hybridSearch(
   queryEmbedding: number[],
   queryText: string,
   topK: number,
+  softmatchaResults?: Array<{ score: number; chunk_ids: number[] }>,
 ): HybridSearchResult[] {
   // 各検索でtopK*2件取得して統合後にtopK件に絞る
   const expandedK = topK * 2;
@@ -296,7 +315,12 @@ export function hybridSearch(
     // FTS5検索エラー（不正なクエリ等）はスキップしてベクトルのみで続行
   }
 
-  // 3. RRF（Reciprocal Rank Fusion）でスコア統合
+  // 3. SoftMatcha構造検索結果のランキング
+  const softmatchaRanking = softmatchaResults
+    ? softmatchaResultsToRanking(softmatchaResults)
+    : new Map<number, number>();
+
+  // 4. RRF（Reciprocal Rank Fusion）でスコア統合
   const RRF_K = 60;
   const scoreMap = new Map<
     number,
@@ -305,6 +329,7 @@ export function hybridSearch(
       score: number;
       vectorRank: number | null;
       bm25Rank: number | null;
+      softmatchaRank: number | null;
     }
   >();
 
@@ -317,6 +342,7 @@ export function hybridSearch(
       score: rrfScore,
       vectorRank: rank,
       bm25Rank: null,
+      softmatchaRank: null,
     });
   });
 
@@ -327,7 +353,6 @@ export function hybridSearch(
     const existing = scoreMap.get(result.id);
 
     if (existing) {
-      // 両方にヒット → スコアを合算
       existing.score += rrfScore;
       existing.bm25Rank = rank;
     } else {
@@ -336,11 +361,54 @@ export function hybridSearch(
         score: rrfScore,
         vectorRank: null,
         bm25Rank: rank,
+        softmatchaRank: null,
       });
     }
   });
 
-  // 4. スコア降順でソートし、topK件に絞る
+  // SoftMatcha構造検索結果のRRFスコア加算
+  const getChunk = getDb().prepare(`
+    SELECT id, source, chunk_text, chunk_index, metadata, created_at
+    FROM chunks WHERE id = ?
+  `);
+  for (const [chunkId, rank] of softmatchaRanking.entries()) {
+    const rrfScore = 1 / (RRF_K + rank);
+    const existing = scoreMap.get(chunkId);
+
+    if (existing) {
+      existing.score += rrfScore;
+      existing.softmatchaRank = rank;
+    } else {
+      // ベクトル/BM25にはなかったがSoftMatchaで見つかったチャンク
+      const chunkRow = getChunk.get(chunkId) as {
+        id: number;
+        source: string;
+        chunk_text: string;
+        chunk_index: number;
+        metadata: string | null;
+        created_at: string;
+      } | undefined;
+
+      if (chunkRow) {
+        scoreMap.set(chunkId, {
+          chunk: {
+            id: chunkRow.id,
+            text: chunkRow.chunk_text,
+            source: chunkRow.source,
+            chunkIndex: chunkRow.chunk_index,
+            metadata: chunkRow.metadata ? JSON.parse(chunkRow.metadata) : undefined,
+            createdAt: chunkRow.created_at,
+          },
+          score: rrfScore,
+          vectorRank: null,
+          bm25Rank: null,
+          softmatchaRank: rank,
+        });
+      }
+    }
+  }
+
+  // 5. スコア降順でソートし、topK件に絞る
   return Array.from(scoreMap.values())
     .sort((a, b) => b.score - a.score)
     .slice(0, topK);
@@ -521,6 +589,15 @@ export function getStaleOrDeletedSources(): { stale: Array<{ source: string; fil
   }
 
   return { stale, deleted };
+}
+
+/** 全チャンクのIDとテキストを取得（SoftMatchaインデックス構築用） */
+export function getAllChunks(): Array<{ id: number; text: string }> {
+  const database = getDb();
+  const rows = database
+    .prepare(`SELECT id, chunk_text FROM chunks ORDER BY id ASC`)
+    .all() as Array<{ id: number; chunk_text: string }>;
+  return rows.map((row) => ({ id: row.id, text: row.chunk_text }));
 }
 
 /** DB接続をクローズ */
