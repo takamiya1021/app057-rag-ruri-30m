@@ -7,8 +7,8 @@ import { EmbeddingTaskType, RURI_PREFIX } from "./types";
 const MODEL_ID = "sirasagi62/ruri-v3-30m-ONNX";
 export const EMBEDDING_DIMENSIONS = 256;
 
-// バッチサイズ（メモリとのバランス）
-const BATCH_SIZE = 50;
+// デフォルトバッチサイズ（環境に応じて変更可能）
+const DEFAULT_BATCH_SIZE = 50;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let extractor: any = null;
@@ -48,15 +48,16 @@ export async function generateEmbedding(
 export async function generateEmbeddings(
   texts: string[],
   taskType: EmbeddingTaskType,
+  options?: { batchSize?: number },
 ): Promise<number[][]> {
   const ext = await getExtractor();
   const prefix = RURI_PREFIX[taskType];
   const inputs = texts.map((t) => prefix + t);
   const results: number[][] = [];
+  const batchSize = options?.batchSize ?? DEFAULT_BATCH_SIZE;
 
-  // BATCH_SIZE単位でバッチ処理
-  for (let i = 0; i < inputs.length; i += BATCH_SIZE) {
-    const batch = inputs.slice(i, i + BATCH_SIZE);
+  for (let i = 0; i < inputs.length; i += batchSize) {
+    const batch = inputs.slice(i, i + batchSize);
     const output = await ext(batch, {
       pooling: "mean",
       normalize: true,
@@ -64,8 +65,8 @@ export async function generateEmbeddings(
 
     // バッチ出力のTensorから各embeddingを抽出
     const data = output.data as Float32Array;
-    const batchSize = batch.length;
-    for (let j = 0; j < batchSize; j++) {
+    const count = batch.length;
+    for (let j = 0; j < count; j++) {
       const start = j * EMBEDDING_DIMENSIONS;
       const embedding = Array.from(data.slice(start, start + EMBEDDING_DIMENSIONS));
       results.push(embedding);

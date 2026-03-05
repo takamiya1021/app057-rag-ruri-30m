@@ -23,6 +23,7 @@ import {
   isIndexStale,
   getSoftMatchaStatus,
 } from "../lib/rag/softmatcha";
+import { addIndexedDir, getIndexedDirs } from "../lib/rag/config";
 
 export function createServer(): McpServer {
   const server = new McpServer({
@@ -52,52 +53,18 @@ export function createServer(): McpServer {
     }
   }, 5000); // サーバー起動から5秒後に実行（起動を妨げないように）
 
-  // --- バックグラウンドインデックス処理 ---
-
-  /** エンベディング生成 + DB保存をバックグラウンドで実行 */
-  function indexInBackground(
-    source: string,
-    textChunks: string[],
-    filePath: string,
-    mtimeMs: number,
-    metadata?: Record<string, string>,
-  ): void {
-    (async () => {
-      try {
-        // 既存ソースがあれば削除（upsert）
-        removeSource(source);
-
-        const embeddings = await generateEmbeddings(textChunks, "RETRIEVAL_DOCUMENT");
-
-        const chunks = textChunks.map((text, i) => ({
-          text,
-          source,
-          chunkIndex: i,
-          metadata,
-        }));
-        addChunks(chunks, embeddings);
-        upsertSourceFile(source, filePath, mtimeMs);
-
-        console.error(`[index] "${source}" のインデックス完了（${textChunks.length}チャンク）`);
-      } catch (e) {
-        console.error(`[index] "${source}" のインデックス失敗: ${e}`);
-      }
-    })();
-  }
-
   // --- ツール登録 ---
 
-  // 1. ファイルからドキュメントをインデックス（バックグラウンド処理）
+  // 1. ファイルからドキュメントをインデックス（同期処理）
   server.tool(
     "add_document",
-    "ファイルパスからドキュメントを読み込み、RAGインデックスに追加する。即座に受付応答し、エンベディング生成とインデックス追加はバックグラウンドで実行される。",
+    "ファイルパスからドキュメントを読み込み、RAGインデックスに追加する（upsert: 同名ソースは自動差し替え）。",
     {
       filePath: z.string().describe("インデックスするファイルのパス（.txt, .md, .pdf, .json対応）"),
       metadata: z.record(z.string()).optional().describe("任意のメタデータ"),
     },
     async ({ filePath, metadata }) => {
       try {
-        // ファイル読み込みとチャンク分割だけ先にやる（軽量）
         const doc = await loadDocument(filePath);
         const resolvedPath = path.resolve(filePath);
         const stat = await fs.stat(resolvedPath);
@@ -111,14 +78,24 @@ export function createServer(): McpServer {
           };
         }
 
-        // エンベディング生成 + DB保存はバックグラウンドで実行
-        indexInBackground(doc.source, textChunks, resolvedPath, stat.mtimeMs, metadata);
+        // 既存ソースがあれば削除（upsert）
+        removeSource(doc.source);
+
+        const embeddings = await generateEmbeddings(textChunks, "RETRIEVAL_DOCUMENT");
+        const chunks = textChunks.map((text, i) => ({
+          text,
+          source: doc.source,
+          chunkIndex: i,
+          metadata,
+        }));
+        const ids = addChunks(chunks, embeddings);
+        upsertSourceFile(doc.source, resolvedPath, stat.mtimeMs);
 
         return {
           content: [
             {
               type: "text",
-              text: `ドキュメント "${doc.source}" を受け付けました（${textChunks.length}チャンク、バックグラウンドでインデックス中）`,
+              text: `ドキュメント "${doc.source}" を追加しました（${ids.length}チャンク）`,
             },
           ],
         };
@@ -312,19 +289,21 @@ export function createServer(): McpServer {
     },
   );
 
-  // 6. ディレクトリ一括インデックス（バックグラウンド処理）
+  // 6. ディレクトリ一括インデックス（同期処理）
+  // 全ファイルのチャンクを集約してからまとめてエンベディング生成（効率重視）
   server.tool(
     "add_directory",
-    "ディレクトリ内の対応ファイル(.md, .txt, .pdf, .json)を再帰的にインデックスする。即座に受付応答し、インデックス処理はバックグラウンドで実行される。",
+    "ディレクトリ内の対応ファイル(.md, .txt, .pdf, .json)を再帰的にインデックスする（upsert対応）。batchSizeでエンベディング生成のバッチサイズを調整可能。",
     {
       dirPath: z.string().describe("インデックスするディレクトリのパス"),
+      batchSize: z.number().optional().default(50).describe("エンベディング生成のバッチサイズ（デフォルト50。メモリに余裕があれば100〜200に増やすと高速化）"),
       skipDirs: z
         .array(z.string())
         .optional()
         .default([".git", ".obsidian", "node_modules", "Excalidraw", ".claude"])
         .describe("スキップするディレクトリ名"),
     },
-    async ({ dirPath, skipDirs }) => {
+    async ({ dirPath, batchSize, skipDirs }) => {
       const SUPPORTED_EXTS = new Set([".md", ".txt", ".pdf", ".json"]);
 
       // 再帰的にファイル収集（シンボリックリンク対応）
@@ -359,7 +338,6 @@ export function createServer(): McpServer {
       }
 
       try {
-        // ファイル収集だけ先にやる（軽量）
         const files = await collectFiles(dirPath);
 
         if (files.length === 0) {
@@ -368,46 +346,86 @@ export function createServer(): McpServer {
           };
         }
 
-        // バックグラウンドで全ファイルをインデックス
-        (async () => {
-          let successCount = 0;
-          let errorCount = 0;
-          for (const filePath of files) {
-            try {
-              const doc = await loadDocument(filePath);
-              const resolvedFilePath = path.resolve(filePath);
-              const fileStat = await fs.stat(resolvedFilePath);
-              const relativePath = path.relative(dirPath, filePath);
+        // フェーズ1: 全ファイルを読み込み・チャンク分割（I/O）
+        interface FileChunks {
+          source: string;
+          filePath: string;
+          mtimeMs: number;
+          textChunks: string[];
+        }
+        const fileChunksList: FileChunks[] = [];
+        let totalChunks = 0;
+        let errorCount = 0;
 
-              removeSource(relativePath);
+        for (const filePath of files) {
+          try {
+            const doc = await loadDocument(filePath);
+            const resolvedFilePath = path.resolve(filePath);
+            const fileStat = await fs.stat(resolvedFilePath);
+            const relativePath = path.relative(dirPath, filePath);
 
-              const textChunks =
-                doc.format === "md" ? splitMarkdown(doc.text) : splitText(doc.text);
+            const textChunks =
+              doc.format === "md" ? splitMarkdown(doc.text) : splitText(doc.text);
 
-              if (textChunks.length === 0) continue;
+            if (textChunks.length === 0) continue;
 
-              const embeddings = await generateEmbeddings(textChunks, "RETRIEVAL_DOCUMENT");
-              const chunks = textChunks.map((text, i) => ({
-                text,
-                source: relativePath,
-                chunkIndex: i,
-              }));
-              addChunks(chunks, embeddings);
-              upsertSourceFile(relativePath, resolvedFilePath, fileStat.mtimeMs);
-              successCount++;
-            } catch (error) {
-              errorCount++;
-              const msg = error instanceof Error ? error.message : String(error);
-              console.error(`[index] ${path.relative(dirPath, filePath)}: ${msg}`);
-            }
+            fileChunksList.push({
+              source: relativePath,
+              filePath: resolvedFilePath,
+              mtimeMs: fileStat.mtimeMs,
+              textChunks,
+            });
+            totalChunks += textChunks.length;
+          } catch (error) {
+            errorCount++;
+            const msg = error instanceof Error ? error.message : String(error);
+            console.error(`[index] ${path.relative(dirPath, filePath)}: ${msg}`);
           }
-          console.error(`[index] ディレクトリ "${dirPath}" のインデックス完了（成功: ${successCount}, エラー: ${errorCount}）`);
-        })();
+        }
+
+        if (fileChunksList.length === 0) {
+          return {
+            content: [{ type: "text", text: `対応ファイルにテキストが含まれていませんでした（エラー: ${errorCount}件）` }],
+          };
+        }
+
+        // フェーズ2: 全チャンクをまとめてエンベディング生成（CPU集約）
+        const allTexts = fileChunksList.flatMap((f) => f.textChunks);
+        console.error(`[index] エンベディング生成開始（${allTexts.length}チャンク, バッチサイズ${batchSize}）`);
+        const allEmbeddings = await generateEmbeddings(allTexts, "RETRIEVAL_DOCUMENT", { batchSize });
+
+        // フェーズ3: ファイルごとにDB保存
+        let embeddingOffset = 0;
+        let successCount = 0;
+        for (const fc of fileChunksList) {
+          try {
+            removeSource(fc.source);
+
+            const embeddings = allEmbeddings.slice(embeddingOffset, embeddingOffset + fc.textChunks.length);
+            embeddingOffset += fc.textChunks.length;
+
+            const chunks = fc.textChunks.map((text, i) => ({
+              text,
+              source: fc.source,
+              chunkIndex: i,
+            }));
+            addChunks(chunks, embeddings);
+            upsertSourceFile(fc.source, fc.filePath, fc.mtimeMs);
+            successCount++;
+          } catch (error) {
+            errorCount++;
+            const msg = error instanceof Error ? error.message : String(error);
+            console.error(`[index] ${fc.source}: ${msg}`);
+          }
+        }
+
+        // インデックス対象ディレクトリをconfigに記録
+        addIndexedDir(dirPath);
 
         return {
           content: [{
             type: "text",
-            text: `${files.length}ファイルを受け付けました。バックグラウンドでインデックス中です。`,
+            text: `ディレクトリ "${dirPath}" のインデックス完了（成功: ${successCount}ファイル, ${totalChunks}チャンク, エラー: ${errorCount}件）`,
           }],
         };
       } catch (error) {
@@ -581,6 +599,19 @@ export function createServer(): McpServer {
         {
           uri: "rag://status",
           text: JSON.stringify(status, null, 2),
+        },
+      ],
+    };
+  });
+
+  // 設定情報（インデックス対象ディレクトリ等）
+  server.resource("rag-config", "rag://config", async () => {
+    const indexedDirs = getIndexedDirs();
+    return {
+      contents: [
+        {
+          uri: "rag://config",
+          text: JSON.stringify({ indexedDirs }, null, 2),
         },
       ],
     };
