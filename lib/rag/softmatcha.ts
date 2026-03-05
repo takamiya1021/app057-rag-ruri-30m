@@ -21,8 +21,7 @@ const DEFAULT_DATA_DIR = path.join(
 // インデックス自動再構築の間隔（24時間）
 const REBUILD_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
-// ドキュメント追加後の再構築デバウンス（30秒）
-const REBUILD_DEBOUNCE_MS = 30_000;
+
 
 /** SoftMatcha 2の検索結果 */
 export interface SoftMatchaResult {
@@ -57,7 +56,6 @@ let dataDir = DEFAULT_DATA_DIR;
 
 // --- 構築状態 ---
 let buildInProgress = false;
-let rebuildTimer: ReturnType<typeof setTimeout> | null = null;
 
 /** データディレクトリを設定 */
 export function setSoftMatchaDataDir(dir: string): void {
@@ -363,35 +361,6 @@ function runBuildProcess(
   });
 }
 
-/**
- * ドキュメント変更を通知（デバウンス付き自動再構築トリガー）
- * add_document / add_directory / sync_updates の完了時に呼ぶ。
- * 30秒以内に再度呼ばれたらタイマーリセット（連続追加に対応）。
- */
-export function notifyDocumentChange(
-  getChunks: () => Array<{ id: number; text: string }>,
-): void {
-  if (rebuildTimer) {
-    clearTimeout(rebuildTimer);
-  }
-
-  rebuildTimer = setTimeout(async () => {
-    rebuildTimer = null;
-    if (buildInProgress) return;
-
-    const chunks = getChunks();
-    if (chunks.length === 0) return;
-
-    console.error(`[softmatcha] ドキュメント変更検知 → バックグラウンド再構築開始（${chunks.length}チャンク）`);
-    const result = await buildSoftMatchaIndex(chunks);
-    if (result.ok) {
-      console.error(`[softmatcha] バックグラウンド再構築完了（${result.numTokens}トークン）`);
-    } else {
-      console.error(`[softmatcha] バックグラウンド再構築失敗: ${result.error}`);
-    }
-  }, REBUILD_DEBOUNCE_MS);
-}
-
 // =====================================================
 // 検索
 // =====================================================
@@ -503,10 +472,6 @@ export async function getSoftMatchaStatus(): Promise<{
 
 /** ブリッジプロセスを停止 */
 export async function shutdownSoftMatcha(): Promise<void> {
-  if (rebuildTimer) {
-    clearTimeout(rebuildTimer);
-    rebuildTimer = null;
-  }
   if (process_ && !process_.killed) {
     try {
       await sendCommand({ action: "shutdown" });

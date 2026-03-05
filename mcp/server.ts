@@ -22,7 +22,6 @@ import {
   hasSoftMatchaIndex,
   isIndexStale,
   getSoftMatchaStatus,
-  notifyDocumentChange,
 } from "../lib/rag/softmatcha";
 
 export function createServer(): McpServer {
@@ -97,8 +96,6 @@ export function createServer(): McpServer {
         // ファイル情報を記録（起動時チェック用）
         upsertSourceFile(doc.source, resolvedPath, stat.mtimeMs);
 
-        // SoftMatchaインデックスの再構築をスケジュール（バックグラウンド・デバウンス30秒）
-        notifyDocumentChange(() => getAllChunks());
 
         return {
           content: [
@@ -392,8 +389,6 @@ export function createServer(): McpServer {
           }
         }
 
-        // SoftMatchaインデックスの再構築をスケジュール（バックグラウンド・デバウンス30秒）
-        notifyDocumentChange(() => getAllChunks());
 
         const success = results.filter((r) => r.chunks > 0);
         const failed = results.filter((r) => r.error);
@@ -526,8 +521,6 @@ export function createServer(): McpServer {
           }
         }
 
-        // SoftMatchaインデックスの再構築をスケジュール（バックグラウンド・デバウンス30秒）
-        notifyDocumentChange(() => getAllChunks());
 
         return {
           content: [{ type: "text", text: results.join("\n") }],
