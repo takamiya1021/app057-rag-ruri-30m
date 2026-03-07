@@ -59,7 +59,7 @@ SoftMatcha 2（ソフトパターンマッチ） → 「フレーズの類似パ
 | カテゴリ | 技術 |
 |----------|------|
 | エンベディング | [ruri-v3-30m](https://huggingface.co/cl-nagoya/ruri-v3-30m)（[ONNX版](https://huggingface.co/sirasagi62/ruri-v3-30m-ONNX)、名古屋大学） |
-| ソフトパターンマッチ | [SoftMatcha 2](https://github.com/softmatcha/softmatcha2)（名古屋大学 + MBZUAI） |
+| ソフトパターンマッチ | [SoftMatcha 2](https://github.com/softmatcha/softmatcha2)（東京大学・京都大学・Sakana AI 他） |
 | 推論 | [@huggingface/transformers](https://github.com/huggingface/transformers.js)（ONNX Runtime） |
 | ベクトル検索 | [sqlite-vec](https://github.com/asg017/sqlite-vec) + SQLite FTS5 |
 | MCPフレームワーク | [@modelcontextprotocol/sdk](https://github.com/modelcontextprotocol/typescript-sdk) |
