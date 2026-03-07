@@ -276,7 +276,7 @@ function ftsSearch(
   }));
 }
 
-/** SoftMatcha語順パターンマッチの結果をチャンクIDごとのランキングに変換 */
+/** SoftMatchaソフトパターンマッチの結果をチャンクIDごとのランキングに変換 */
 function softmatchaResultsToRanking(
   results: Array<{ score: number; chunk_ids: number[] }>,
 ): Map<number, number> {
@@ -294,7 +294,7 @@ function softmatchaResultsToRanking(
   return rankMap;
 }
 
-/** ハイブリッド検索（ベクトル + BM25キーワード + SoftMatcha語順パターンマッチをRRFで統合） */
+/** ハイブリッド検索（ベクトル + BM25キーワード + SoftMatchaソフトパターンマッチをRRFで統合） */
 export function hybridSearch(
   queryEmbedding: number[],
   queryText: string,
@@ -315,7 +315,7 @@ export function hybridSearch(
     // FTS5検索エラー（不正なクエリ等）はスキップしてベクトルのみで続行
   }
 
-  // 3. SoftMatcha語順パターンマッチ結果のランキング
+  // 3. SoftMatchaソフトパターンマッチ結果のランキング
   const softmatchaRanking = softmatchaResults
     ? softmatchaResultsToRanking(softmatchaResults)
     : new Map<number, number>();
@@ -366,7 +366,7 @@ export function hybridSearch(
     }
   });
 
-  // SoftMatcha語順パターンマッチ結果のRRFスコア加算
+  // SoftMatchaソフトパターンマッチ結果のRRFスコア加算
   const getChunk = getDb().prepare(`
     SELECT id, source, chunk_text, chunk_index, metadata, created_at
     FROM chunks WHERE id = ?

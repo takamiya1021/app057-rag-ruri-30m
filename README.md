@@ -50,7 +50,7 @@
 ```
 ruri（ベクトル検索）    → 「意味が近い」を見つける
 BM25（キーワード検索）  → 「単語が一致する」を見つける
-SoftMatcha 2（語順パターンマッチ） → 「パターンが似ている」を見つける
+SoftMatcha 2（ソフトパターンマッチ） → 「パターンが似ている」を見つける
 ```
 
 ### Built With
@@ -58,7 +58,7 @@ SoftMatcha 2（語順パターンマッチ） → 「パターンが似ている
 | カテゴリ | 技術 |
 |----------|------|
 | エンベディング | [ruri-v3-30m](https://huggingface.co/cl-nagoya/ruri-v3-30m)（[ONNX版](https://huggingface.co/sirasagi62/ruri-v3-30m-ONNX)、名古屋大学） |
-| 語順パターンマッチ | [SoftMatcha 2](https://github.com/softmatcha/softmatcha2)（名古屋大学 + MBZUAI） |
+| ソフトパターンマッチ | [SoftMatcha 2](https://github.com/softmatcha/softmatcha2)（名古屋大学 + MBZUAI） |
 | 推論 | [@huggingface/transformers](https://github.com/huggingface/transformers.js)（ONNX Runtime） |
 | ベクトル検索 | [sqlite-vec](https://github.com/asg017/sqlite-vec) + SQLite FTS5 |
 | MCPフレームワーク | [@modelcontextprotocol/sdk](https://github.com/modelcontextprotocol/typescript-sdk) |
@@ -84,7 +84,7 @@ SoftMatcha 2（語順パターンマッチ） → 「パターンが似ている
 |---------|------|------------|
 | ベクトル検索 | ruri-v3-30m + sqlite-vec | 意味検索、言い換え表現、言語横断 |
 | BM25検索 | SQLite FTS5 | 固有名詞、コマンド名、完全一致 |
-| 語順パターンマッチ | SoftMatcha 2（fastText + MeCab） | 語順・パターンが似ている表現の検出（soft pattern matching） |
+| ソフトパターンマッチ | SoftMatcha 2（fastText + MeCab） | フレーズの類似パターン検出（置換・挿入・削除を許容） |
 
 3つの検索結果を **RRF（Reciprocal Rank Fusion, k=60）** で統合します。複数の方式にヒットした結果ほどスコアが高くなり、上位に浮上します。
 
@@ -237,7 +237,7 @@ claude mcp add kuro-rag-ruri-30m npx tsx /path/to/app057-rag-ruri-30m/mcp/index.
 | `remove_source` | ソースをインデックスから削除 |
 | `check_updates` | ファイルの更新・削除を検出 |
 | `sync_updates` | 検出された変更をインデックスに反映 |
-| `build_softmatcha_index` | SoftMatcha 2の語順パターンマッチ用インデックスを構築/再構築 |
+| `build_softmatcha_index` | SoftMatcha 2のソフトパターンマッチ用インデックスを構築/再構築 |
 
 ---
 
@@ -361,7 +361,7 @@ npm run dev
 | 推論 | ONNX Runtime | CPU上でのモデル推論 |
 | ベクトル検索 | sqlite-vec | ベクトル近傍検索（KNN） |
 | 全文検索 | SQLite FTS5 | BM25ベースのキーワード検索 |
-| 語順パターンマッチ | SoftMatcha 2 | soft pattern matching（fastText + MeCab） |
+| ソフトパターンマッチ | SoftMatcha 2 | soft pattern matching（fastText + MeCab） |
 | スコア統合 | RRF（k=60） | 3方式の検索結果を統合 |
 | MCP | @modelcontextprotocol/sdk | Claude Code との連携 |
 | Web UI | Next.js 16 / React 19 | 対話的検索インターフェース |

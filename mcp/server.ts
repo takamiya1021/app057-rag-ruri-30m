@@ -197,10 +197,10 @@ export function createServer(): McpServer {
     },
   );
 
-  // 3. トリプルハイブリッド検索（ベクトル + BM25 + SoftMatcha語順パターンマッチ）
+  // 3. トリプルハイブリッド検索（ベクトル + BM25 + SoftMatchaソフトパターンマッチ）
   server.tool(
     "search",
-    "RAGインデックスをトリプルハイブリッド検索（ベクトル + BM25 + 語順パターンマッチ）し、関連するチャンクを返す",
+    "RAGインデックスをトリプルハイブリッド検索（ベクトル + BM25 + ソフトパターンマッチ）し、関連するチャンクを返す",
     {
       query: z.string().describe("検索クエリ"),
       topK: z.number().optional().default(5).describe("返す結果の最大数"),
@@ -213,7 +213,7 @@ export function createServer(): McpServer {
         // ベクトル検索用のエンベディング生成
         const queryEmbedding = await generateEmbedding(query, "RETRIEVAL_QUERY");
 
-        // SoftMatcha 2 語順パターンマッチ（インデックスがあれば並行実行）
+        // SoftMatcha 2 ソフトパターンマッチ（インデックスがあれば並行実行）
         let softmatchaResults: Array<{ score: number; chunk_ids: number[] }> | undefined;
         if (hasSoftMatchaIndex()) {
           try {
@@ -600,7 +600,7 @@ export function createServer(): McpServer {
   // 9. SoftMatchaインデックス構築/再構築
   server.tool(
     "build_softmatcha_index",
-    "SoftMatcha 2の語順パターンマッチ用インデックスを構築または再構築する。ドキュメント追加後に実行すると検索精度が向上する。",
+    "SoftMatcha 2のソフトパターンマッチ用インデックスを構築または再構築する。ドキュメント追加後に実行すると検索精度が向上する。",
     {},
     async () => {
       try {
@@ -663,7 +663,7 @@ export function createServer(): McpServer {
     };
   });
 
-  // SoftMatcha語順パターンマッチの状態
+  // SoftMatchaソフトパターンマッチの状態
   server.resource("softmatcha-status", "rag://softmatcha-status", async () => {
     const status = await getSoftMatchaStatus();
     return {

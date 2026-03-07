@@ -1,4 +1,4 @@
-// SoftMatcha 2 語順パターンマッチクライアント（soft pattern matching）
+// SoftMatcha 2 ソフトパターンマッチクライアント（soft pattern matching）
 // 検索: 常駐Pythonブリッジ（stdin/stdout JSON通信）
 // 構築: 別プロセスで非同期実行（検索をブロックしない）
 
@@ -370,7 +370,7 @@ function runBuildProcess(
 // 検索
 // =====================================================
 
-/** SoftMatcha 2で語順パターンマッチ検索 */
+/** SoftMatcha 2でソフトパターンマッチ検索 */
 export async function searchSoftMatcha(
   query: string,
   numCandidates: number = 20,
