@@ -13,6 +13,8 @@ const DEFAULT_CONFIG_PATH = path.join(
 interface RagConfig {
   // インデックス対象ディレクトリの絶対パス一覧
   indexedDirs: string[];
+  // Google Drive差分同期用のchangeトークン
+  gdriveChangeToken?: string;
 }
 
 const DEFAULT_CONFIG: RagConfig = {
@@ -32,6 +34,7 @@ export function loadConfig(): RagConfig {
     const parsed = JSON.parse(raw);
     return {
       indexedDirs: Array.isArray(parsed.indexedDirs) ? parsed.indexedDirs : [],
+      gdriveChangeToken: parsed.gdriveChangeToken ?? undefined,
     };
   } catch {
     return { ...DEFAULT_CONFIG };
@@ -69,4 +72,16 @@ export function removeIndexedDir(dirPath: string): void {
 /** インデックス対象ディレクトリ一覧を取得 */
 export function getIndexedDirs(): string[] {
   return loadConfig().indexedDirs;
+}
+
+/** Google Drive差分同期用のchangeトークンを取得 */
+export function getGdriveChangeToken(): string | undefined {
+  return loadConfig().gdriveChangeToken;
+}
+
+/** Google Drive差分同期用のchangeトークンを保存 */
+export function setGdriveChangeToken(token: string): void {
+  const config = loadConfig();
+  config.gdriveChangeToken = token;
+  saveConfig(config);
 }

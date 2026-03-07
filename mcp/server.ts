@@ -24,6 +24,7 @@ import {
   getSoftMatchaStatus,
 } from "../lib/rag/softmatcha";
 import { addIndexedDir, getIndexedDirs } from "../lib/rag/config";
+import { isGdriveSyncEnabled, syncChanges } from "../lib/rag/gdriveSync";
 
 export function createServer(): McpServer {
   const server = new McpServer({
@@ -49,7 +50,21 @@ export function createServer(): McpServer {
 
     (async () => {
       try {
-        // 1. ruri+BM25の差分更新
+        // 1a. Google Drive差分同期（トークン設定済みの場合のみ）
+        let gdriveChanged = false;
+        if (isGdriveSyncEnabled()) {
+          try {
+            const result = await syncChanges();
+            if (result.downloaded > 0 || result.deleted > 0) {
+              gdriveChanged = true;
+              console.error(`[auto-update] Google Drive同期完了（DL: ${result.downloaded}, インデックス: ${result.indexed}, 削除: ${result.deleted}, エラー: ${result.errors}）`);
+            }
+          } catch (e) {
+            console.error(`[auto-update] Google Drive同期エラー: ${e}`);
+          }
+        }
+
+        // 1b. ローカルファイルの差分更新
         const { stale, deleted } = getStaleOrDeletedSources();
         if (stale.length > 0 || deleted.length > 0) {
           console.error(`[auto-update] ruri+BM25差分更新開始（更新: ${stale.length}, 削除: ${deleted.length}）`);
@@ -74,8 +89,8 @@ export function createServer(): McpServer {
           console.error("[auto-update] ruri+BM25差分更新完了");
         }
 
-        // 2. SoftMatcha 2の再構築（ruri+BM25に変更があった場合、または24時間経過）
-        const needsSoftmatchaRebuild = stale.length > 0 || deleted.length > 0 || isIndexStale();
+        // 2. SoftMatcha 2の再構築（変更があった場合、または24時間経過）
+        const needsSoftmatchaRebuild = stale.length > 0 || deleted.length > 0 || gdriveChanged || isIndexStale();
         if (needsSoftmatchaRebuild) {
           const allChunks = getAllChunks();
           if (allChunks.length > 0) {

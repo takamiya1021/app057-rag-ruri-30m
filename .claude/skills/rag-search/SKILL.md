@@ -54,9 +54,6 @@ MCPの`search`を呼ぶ**前に**、クロが以下の最適化を行う。
 4. 結果をユーザーに分かりやすく回答
 5. ヒットしなければキーワードを変えて再検索
 
-※ インデックスの更新チェック（ruri+BM25差分更新・SoftMatcha再構築）は
-  MCP側で自動実行される（検索時に1時間に1回バックグラウンドで実行）。
-  手動で即時更新したい場合は check_updates → sync_updates → build_softmatcha_index。
 ```
 
 ## インデックス新規作成の手順
@@ -75,6 +72,49 @@ MCPの`search`を呼ぶ**前に**、クロが以下の最適化を行う。
    - プロジェクトルートディレクトリで実行すること
 3. 複数ディレクトリがある場合は、各ディレクトリに対して `add-dir` を実行
 4. ruri+BM25のインデックス作成が完了したら、MCP `build_softmatcha_index` でSoftMatcha 2も構築
+
+## Google Driveのインデックス作成
+
+Google Drive上のファイルをRAGインデックスに登録する手順。
+
+### 前提
+- gws CLI（Google Workspace CLI）がインストール・認証済みであること
+
+### 手順
+
+1. **ファイルリスト取得**
+   ```bash
+   gws drive files list --params '{"pageSize": 1000, "fields": "files(id,name,mimeType,size),nextPageToken"}' --page-all > /tmp/gdrive-dl/drive_all.json
+   ```
+
+2. **DL対象フィルタリング** — 以下を除外:
+   - `image/*`, `video/*`, `audio/*`
+   - `application/vnd.google-apps.shortcut`, `.folder`, `.form`, `.map`, `.site`, `.drawing`
+
+3. **1件ずつ順次DL**（並列禁止、APIエラー時リトライ禁止）
+   | 種類 | DL方法 |
+   |------|--------|
+   | 通常ファイル | `gws drive files get --params '{"fileId": "<ID>", "alt": "media"}' --output <path>` |
+   | Google Docs | `gws drive files export --params '{"fileId": "<ID>", "mimeType": "text/plain"}' --output <path>.txt` |
+   | スプレッドシート | `gws drive files export --params '{"fileId": "<ID>", "mimeType": "text/csv"}' --output <path>.csv` |
+   | スライド | `gws drive files export --params '{"fileId": "<ID>", "mimeType": "text/plain"}' --output <path>.txt` |
+
+4. **CLIでバッチインデックス作成**（MCPではなくCLI）
+   ```bash
+   npx tsx cli/rag-cli.ts add-dir /tmp/gdrive-dl/files 50
+   ```
+
+5. **SoftMatcha 2インデックス再構築** — MCP `build_softmatcha_index` を実行
+
+6. **後片付け** — `rm -rf /tmp/gdrive-dl/`
+7. **changeトークン取得** — `npx tsx cli/gdrive-sync.ts init`
+   - 以降の差分同期で使うトークンを取得・保存する
+
+## インデックス更新
+
+手動で即時更新したい場合:
+- **ローカルファイル**: check_updates → sync_updates → build_softmatcha_index
+- **Google Drive**: `npx tsx cli/gdrive-sync.ts sync` → build_softmatcha_index
 
 ## 注意
 

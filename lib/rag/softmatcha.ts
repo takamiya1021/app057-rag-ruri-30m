@@ -205,7 +205,11 @@ export function buildCorpus(
 
   const fd = fs.openSync(corpusPath, "w");
   for (const chunk of chunks) {
-    const cleanText = chunk.text.replace(/\n/g, " ").trim();
+    // 改行→スペース、制御文字・バイナリ除去（MeCabトークナイザ保護）
+    const cleanText = chunk.text
+      .replace(/\n/g, " ")
+      .replace(/[\x00-\x08\x0e-\x1f\x7f]/g, "")
+      .trim();
     const line = cleanText + "\n";
     const bytes = Buffer.byteLength(line, "utf-8");
 
@@ -370,16 +374,7 @@ function runBuildProcess(
 // 検索
 // =====================================================
 
-/** MeCabでクエリからキーフレーズを抽出（ブリッジ経由） */
-async function extractPhrases(text: string): Promise<string[]> {
-  const response = await sendCommand({
-    action: "extract_phrases",
-    text,
-  }) as { phrases: string[] };
-  return response.phrases || [];
-}
-
-/** 単一フレーズでSoftMatcha検索 */
+/** SoftMatcha検索 */
 async function searchPhrase(
   phrase: string,
   numCandidates: number,
@@ -403,8 +398,8 @@ async function searchPhrase(
 /**
  * SoftMatcha 2でソフトパターンマッチ検索
  *
- * クエリからMeCabでキーフレーズを抽出し、
- * 各フレーズを個別にSoftMatchaに渡して結果をマージする。
+ * クエリをそのまま渡す（公式の使い方に準拠）。
+ * 12トークン超の場合はbridge側で先頭12トークンに切り詰めて検索する。
  */
 export async function searchSoftMatcha(
   query: string,
@@ -421,25 +416,7 @@ export async function searchSoftMatcha(
     if (!loaded) return [];
   }
 
-  // クエリからキーフレーズを抽出
-  const phrases = await extractPhrases(query);
-  if (phrases.length === 0) {
-    // フレーズ抽出できなかった場合はクエリをそのまま試す
-    return searchPhrase(query, numCandidates, minSimilarity);
-  }
-
-  console.error(`[softmatcha] フレーズ抽出: ${JSON.stringify(phrases)}`);
-
-  // 各フレーズで個別に検索してマージ
-  const allResults: SoftMatchaResult[] = [];
-  for (const phrase of phrases) {
-    const results = await searchPhrase(phrase, numCandidates, minSimilarity);
-    allResults.push(...results);
-  }
-
-  // スコア順でソート
-  allResults.sort((a, b) => b.score - a.score);
-  return allResults;
+  return searchPhrase(query, numCandidates, minSimilarity);
 }
 
 /** SoftMatcha 2のインデックスをロード */

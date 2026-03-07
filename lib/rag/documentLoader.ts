@@ -22,8 +22,9 @@ export async function loadDocument(filePath: string): Promise<LoadedDocument> {
       return { text, source, format: "md" };
     }
     case ".pdf": {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const pdfParse = (await import("pdf-parse") as any).default ?? (await import("pdf-parse"));
+      // pdf-parse v1: default exportが関数
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const pdfParse = require("pdf-parse");
       const buffer = await fs.readFile(filePath);
       const data = await pdfParse(buffer);
       return { text: data.text, source, format: "pdf" };
