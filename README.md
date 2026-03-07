@@ -29,6 +29,7 @@
   - [3. Web UI](#3-web-ui-で使う)
 - [対応ファイル形式](#-対応ファイル形式)
 - [データベース](#-データベース)
+  - [Google Driveのインデックス作成](#google-driveのインデックス作成)
 - [技術スタック](#-技術スタック)
 - [ライセンス](#-ライセンス)
 - [コンタクト](#-コンタクト)
@@ -77,6 +78,7 @@ SoftMatcha 2（ソフトパターンマッチ） → 「フレーズの類似パ
 - **3つのインターフェース** — MCP サーバー / Web UI / CLI
 - **軽量ストレージ** — SQLite + sqlite-vec（外部DBサーバー不要。参考: Vault約1,200ファイル + Google Drive約1,200ファイルで約75MB）
 - **インデックス自動管理** — ファイルの更新・削除を検出し、差分同期が可能
+- **Google Drive対応** — gws CLI経由でGoogle Driveのファイルをインデックス。差分同期も自動実行
 
 ### トリプルハイブリッド検索とは
 
@@ -349,8 +351,27 @@ npm run dev
 
 検索時に1時間に1回、バックグラウンドで以下が自動実行されます（検索はブロックしません）。
 
-1. **ruri+BM25 差分更新** — ファイルのmtimeを比較し、変更・削除を検出して再インデックス/除去
-2. **SoftMatcha 2 再構築** — 差分があった場合、または前回構築から24時間以上経過した場合に再構築
+1. **Google Drive 差分同期** — `gws drive changes` APIで変更を検出し、DL→インデックス更新（トークン設定済みの場合）
+2. **ローカルファイル差分更新** — ファイルのmtimeを比較し、変更・削除を検出して再インデックス/除去
+3. **SoftMatcha 2 再構築** — 差分があった場合、または前回構築から24時間以上経過した場合に再構築
+
+#### Google Driveのインデックス作成
+
+Google Drive上のファイルもインデックス対象にできます。初回セットアップの詳細は [doc/gdrive-index-guide.md](doc/gdrive-index-guide.md) を参照してください。
+
+```bash
+# 初回: ファイルDL → インデックス作成
+npx tsx cli/rag-cli.ts add-dir /tmp/gdrive-dl/files
+
+# 差分同期の初期化（changeトークン取得）
+npx tsx cli/gdrive-sync.ts init
+
+# 手動で差分同期
+npx tsx cli/gdrive-sync.ts sync
+```
+
+> **Note**
+> [gws CLI](https://github.com/nichochar/gws)（Google Workspace CLI）のインストールと認証が必要です。
 
 <p align="right">(<a href="#目次">トップに戻る</a>)</p>
 
