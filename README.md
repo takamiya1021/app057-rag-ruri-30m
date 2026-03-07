@@ -75,7 +75,7 @@ SoftMatcha 2（構造検索） → 「パターンが似ている」を見つけ
 - **日本語特化** — ruri-v3-30m（37Mパラメータ、256次元）による高精度な日本語ベクトル表現
 - **トリプルハイブリッド検索** — ベクトル検索 + BM25 + SoftMatcha 2 を RRF（k=60）で統合
 - **3つのインターフェース** — MCP サーバー / Web UI / CLI
-- **軽量ストレージ** — SQLite + sqlite-vec（外部DBサーバー不要、DBサイズ約39MB）
+- **軽量ストレージ** — SQLite + sqlite-vec（外部DBサーバー不要。参考: Vault約1,200ファイル + Google Drive約1,200ファイルで約75MB）
 - **インデックス自動管理** — ファイルの更新・削除を検出し、差分同期が可能
 
 ### トリプルハイブリッド検索とは
@@ -196,7 +196,7 @@ claude mcp add kuro-rag-ruri-30m npx tsx /path/to/app057-rag-ruri-30m/mcp/index.
 プロジェクトに同梱されている Claude Code スキル（`.claude/skills/rag-search/`）を使うと、以下が自動で行われます：
 
 - **クエリ最適化**: ひらがな→カタカナ変換、口語→検索キーワード変換
-- **インデックス更新チェック**: 検索前にファイルの更新・削除を自動検出し、確認の上で同期
+- **インデックス存在チェック**: インデックスがない場合は作成を案内
 
 このリポジトリをcloneした状態でClaude Codeを起動すれば、`.claude/skills/` 内のスキルは自動で認識されます。
 
@@ -212,11 +212,14 @@ claude mcp add kuro-rag-ruri-30m npx tsx /path/to/app057-rag-ruri-30m/mcp/index.
 
 スキルが発動すると、以下が自動で行われます：
 
-1. インデックスの更新チェック（更新があれば確認の上で同期）
-2. SoftMatcha 2の更新チェック（24時間以上経過していれば確認の上で再構築）
-3. 口語からの検索キーワード最適化
-4. MCP `search` ツールの呼び出し（トリプルハイブリッド検索）
-5. 結果の表示
+1. インデックス存在チェック（なければ作成を案内）
+2. 口語からの検索キーワード最適化
+3. MCP `search` ツールの呼び出し（トリプルハイブリッド検索）
+4. 結果の表示
+
+> **Note**
+> インデックスの更新（ruri+BM25差分更新・SoftMatcha再構築）は、検索時に1時間に1回バックグラウンドで自動実行されます。
+> 手動で即時更新したい場合は `check_updates` → `sync_updates` → `build_softmatcha_index` の順に実行してください。
 
 > **Note**
 > 「検索して」だけではファイル検索と区別がつかないため、必ず「**ラグ**」を含めてください。
@@ -313,11 +316,38 @@ npm run dev
 
 ## ■ データベース
 
-デフォルトの保存先: `~/.local/share/rag-mcp-ruri-30m/rag.db`
+デフォルトのデータディレクトリ: `~/.local/share/rag-mcp-ruri-30m/`（XDG Base Directory準拠、存在しなければ自動作成）
 
-環境変数 `RAG_DB_PATH` で変更可能です。
+```
+~/.local/share/rag-mcp-ruri-30m/
+├── rag.db              # SQLite DB（ベクトル検索 + BM25、環境変数 RAG_DB_PATH で変更可）
+├── config.json         # 設定ファイル（インデックス対象ディレクトリ等）
+└── softmatcha/         # SoftMatcha 2 インデックス
+    ├── corpus.txt      #   全チャンク結合テキスト
+    ├── corpus_map.json #   チャンクID↔バイトオフセットのマッピング
+    ├── index/          #   インデックスファイル群
+    └── last_build      #   最終構築日時
+```
 
-SoftMatcha 2のインデックスは `~/.local/share/rag-mcp-ruri-30m/softmatcha/` に保存されます。
+### config.json
+
+`add_directory` でディレクトリをインデックスすると、対象パスが自動で記録されます。
+
+```json
+{
+  "indexedDirs": [
+    "/home/user/vaults",
+    "/path/to/documents"
+  ]
+}
+```
+
+### インデックスの自動更新
+
+検索時に1時間に1回、バックグラウンドで以下が自動実行されます（検索はブロックしません）。
+
+1. **ruri+BM25 差分更新** — ファイルのmtimeを比較し、変更・削除を検出して再インデックス/除去
+2. **SoftMatcha 2 再構築** — 差分があった場合、または前回構築から24時間以上経過した場合に再構築
 
 <p align="right">(<a href="#目次">トップに戻る</a>)</p>
 

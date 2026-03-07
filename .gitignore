@@ -7,7 +7,8 @@ dist/
 .env
 .env.local
 .env*.local
-doc/
+doc/*
+!doc/spec.md
 note/
 png/
 *.tsbuildinfo

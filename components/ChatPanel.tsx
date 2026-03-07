@@ -85,7 +85,7 @@ export default function ChatPanel({ hasApiKey }: { hasApiKey: boolean }) {
     // パス区切り（/）を含み、ファイル拡張子で終わる文字列をリンク化
     // マークダウン装飾（**、`）も除去して検出
     // **path/file.md** / `path/file.md` / path/file.md を検出
-    const pathPattern = /\*\*([^*]+\.(?:md|txt|json|pdf))\*\*|`([^`]+\.(?:md|txt|json|pdf))`|((?:[^\s`,()*]+\/)+[^\s`,()*]+\.(?:md|txt|json|pdf))/g;
+    const pathPattern = /\*\*([^*]+\.(?:md|txt|json|pdf))\*\*|`([^`]+\.(?:md|txt|json|pdf))`|(?:^|\n)-\s+((?:[^\n`,()*]+\/)+[^\n`,()*]+\.(?:md|txt|json|pdf))|((?:[^\s`,()*]+\/)+[^\s`,()*]+\.(?:md|txt|json|pdf))/gm;
     const parts: (string | { type: "link"; source: string })[] = [];
     let lastIndex = 0;
     let match;
@@ -94,7 +94,13 @@ export default function ChatPanel({ hasApiKey }: { hasApiKey: boolean }) {
       if (match.index > lastIndex) {
         parts.push(text.slice(lastIndex, match.index));
       }
-      parts.push({ type: "link", source: match[1] || match[2] || match[3] });
+      const source = match[1] || match[2] || match[3] || match[4];
+      // `- path`パターンの場合、`- `部分はリンクに含めない
+      if (match[3]) {
+        const prefixLen = match[0].indexOf(source);
+        parts.push(text.slice(match.index, match.index + prefixLen));
+      }
+      parts.push({ type: "link", source });
       lastIndex = match.index + match[0].length;
     }
     if (lastIndex < text.length) {
