@@ -370,7 +370,42 @@ function runBuildProcess(
 // 検索
 // =====================================================
 
-/** SoftMatcha 2でソフトパターンマッチ検索 */
+/** MeCabでクエリからキーフレーズを抽出（ブリッジ経由） */
+async function extractPhrases(text: string): Promise<string[]> {
+  const response = await sendCommand({
+    action: "extract_phrases",
+    text,
+  }) as { phrases: string[] };
+  return response.phrases || [];
+}
+
+/** 単一フレーズでSoftMatcha検索 */
+async function searchPhrase(
+  phrase: string,
+  numCandidates: number,
+  minSimilarity: number,
+): Promise<SoftMatchaResult[]> {
+  const response = await sendCommand({
+    action: "search",
+    query: phrase,
+    num_candidates: numCandidates,
+    min_similarity: minSimilarity,
+  }) as SearchResponse;
+
+  if (response.error) {
+    console.error(`[softmatcha] 検索エラー（"${phrase}"）: ${response.error}`);
+    return [];
+  }
+
+  return response.results || [];
+}
+
+/**
+ * SoftMatcha 2でソフトパターンマッチ検索
+ *
+ * クエリからMeCabでキーフレーズを抽出し、
+ * 各フレーズを個別にSoftMatchaに渡して結果をマージする。
+ */
 export async function searchSoftMatcha(
   query: string,
   numCandidates: number = 20,
@@ -386,19 +421,25 @@ export async function searchSoftMatcha(
     if (!loaded) return [];
   }
 
-  const response = await sendCommand({
-    action: "search",
-    query,
-    num_candidates: numCandidates,
-    min_similarity: minSimilarity,
-  }) as SearchResponse;
-
-  if (response.error) {
-    console.error(`[softmatcha] 検索エラー: ${response.error}`);
-    return [];
+  // クエリからキーフレーズを抽出
+  const phrases = await extractPhrases(query);
+  if (phrases.length === 0) {
+    // フレーズ抽出できなかった場合はクエリをそのまま試す
+    return searchPhrase(query, numCandidates, minSimilarity);
   }
 
-  return response.results || [];
+  console.error(`[softmatcha] フレーズ抽出: ${JSON.stringify(phrases)}`);
+
+  // 各フレーズで個別に検索してマージ
+  const allResults: SoftMatchaResult[] = [];
+  for (const phrase of phrases) {
+    const results = await searchPhrase(phrase, numCandidates, minSimilarity);
+    allResults.push(...results);
+  }
+
+  // スコア順でソート
+  allResults.sort((a, b) => b.score - a.score);
+  return allResults;
 }
 
 /** SoftMatcha 2のインデックスをロード */

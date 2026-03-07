@@ -5,7 +5,8 @@ TypeScript側からstdin/stdout JSON通信で呼び出す常駐プロセス。
 
 コマンド:
   build  — コーパスファイルからSoftMatcha 2インデックスを構築
-  search — クエリでソフトパターンマッチ検索し、マッチしたチャンクIDとスコアを返す
+  search — フレーズでソフトパターンマッチ検索し、マッチしたチャンクIDとスコアを返す
+  extract_phrases — MeCabでテキストからキーフレーズを抽出する
   status — インデックス状態を返す
   shutdown — プロセス終了
 """
@@ -237,6 +238,49 @@ class SoftMatchaBridge:
             "threshold": round(float(thres) * 100, 1),
         }
 
+    def extract_phrases(self, text: str):
+        """MeCabでテキストからキーフレーズを抽出する"""
+        import MeCab
+        tagger = MeCab.Tagger()
+        node = tagger.parseToNode(text)
+
+        phrases = []
+        current_nouns = []
+
+        while node:
+            surface = node.surface
+            if not surface:
+                node = node.next
+                continue
+            features = node.feature.split(',')
+            pos = features[0]
+
+            if pos == '名詞':
+                current_nouns.append(surface)
+            elif pos == '助詞' and surface == 'の' and len(current_nouns) > 0:
+                # 名詞間の「の」はスキップして連結を続ける
+                pass
+            else:
+                if len(current_nouns) >= 2:
+                    phrases.append(''.join(current_nouns))
+                current_nouns = []
+
+            node = node.next
+
+        # 最後のグループ
+        if len(current_nouns) >= 2:
+            phrases.append(''.join(current_nouns))
+
+        # 重複除去（順序保持）
+        seen = set()
+        unique = []
+        for p in phrases:
+            if p not in seen:
+                seen.add(p)
+                unique.append(p)
+
+        return {"phrases": unique}
+
     def handle_command(self, cmd: dict) -> dict:
         """コマンドを処理"""
         action = cmd.get("action", "")
@@ -268,6 +312,10 @@ class SoftMatchaBridge:
             num_candidates = cmd.get("num_candidates", 20)
             min_similarity = cmd.get("min_similarity", 0.3)
             return self.search(query, num_candidates, min_similarity)
+
+        elif action == "extract_phrases":
+            text = cmd.get("text", "")
+            return self.extract_phrases(text)
 
         elif action == "status":
             return {
