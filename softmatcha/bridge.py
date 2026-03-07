@@ -5,7 +5,7 @@ TypeScript側からstdin/stdout JSON通信で呼び出す常駐プロセス。
 
 コマンド:
   build  — コーパスファイルからSoftMatcha 2インデックスを構築
-  search — クエリで構造検索し、マッチしたチャンクIDとスコアを返す
+  search — クエリで語順パターンマッチ検索し、マッチしたチャンクIDとスコアを返す
   status — インデックス状態を返す
   shutdown — プロセス終了
 """
@@ -147,7 +147,7 @@ class SoftMatchaBridge:
         return num_tokens
 
     def search(self, query: str, num_candidates: int = 20, min_similarity: float = 0.3):
-        """クエリで構造検索し、チャンクIDとスコアを返す"""
+        """クエリで語順パターンマッチ検索し、チャンクIDとスコアを返す"""
         if not self.ready or self.searcher is None:
             return {"error": "インデックスが読み込まれていません"}
 

@@ -136,7 +136,7 @@ export async function POST(request: Request) {
             console.log("[searchDocuments] optimized:", optimizedQuery);
             const queryEmbedding = await generateEmbedding(optimizedQuery, "RETRIEVAL_QUERY");
 
-            // SoftMatcha構造検索（インデックスがあれば実行）
+            // SoftMatcha語順パターンマッチ（インデックスがあれば実行）
             let softmatchaResults: Array<{ score: number; chunk_ids: number[] }> | undefined;
             if (hasSoftMatchaIndex()) {
               try {
