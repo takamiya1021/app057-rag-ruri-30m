@@ -326,6 +326,7 @@ npm run dev
 | テキスト | `.txt` | 固定長（500文字、100文字オーバーラップ） |
 | PDF | `.pdf` | 固定長 |
 | JSON | `.json` | 固定長 |
+| CSV | `.csv` | 固定長 |
 
 ---
 
@@ -370,10 +371,10 @@ npm run dev
 Google Drive上のファイルもインデックス対象にできます。初回セットアップの詳細は [doc/gdrive-index-guide.md](doc/gdrive-index-guide.md) を参照してください。
 
 ```bash
-# 初回: ファイルDL → インデックス作成
-npx tsx cli/rag-cli.ts add-dir /tmp/gdrive-dl/files
+# 初回: Google Driveの全ファイルをDL → インデックス一括作成
+npx tsx cli/gdrive-sync.ts bulk
 
-# 差分同期の初期化（changeトークン取得）
+# 差分同期の初期化（changeトークン取得）— bulkで自動保存されるため通常不要
 npx tsx cli/gdrive-sync.ts init
 
 # 手動で差分同期

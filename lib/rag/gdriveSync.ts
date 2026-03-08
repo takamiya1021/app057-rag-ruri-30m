@@ -6,9 +6,12 @@
 // 2. changes list でそのトークン以降の変更を検出
 // 3. 変更ファイルだけDL → インデックス更新
 
-import { execSync } from "node:child_process";
+import { execSync, exec } from "node:child_process";
+import { promisify } from "node:util";
 import * as fs from "node:fs";
 import * as path from "node:path";
+
+const execAsync = promisify(exec);
 import { getGdriveChangeToken, setGdriveChangeToken } from "./config";
 import { removeSource, addChunks, upsertSourceFile } from "./vectorStore";
 import { loadDocument } from "./documentLoader";
@@ -18,16 +21,22 @@ import { generateEmbeddings } from "./embedding";
 const GWS = "gws";
 const DL_DIR = "/tmp/gdrive-sync/files";
 
-// DL対象外のmimeType
-const SKIP_MIME_PREFIXES = ["image/", "video/", "audio/"];
-const SKIP_MIME_TYPES = new Set([
-  "application/vnd.google-apps.shortcut",
-  "application/vnd.google-apps.folder",
-  "application/vnd.google-apps.form",
-  "application/vnd.google-apps.map",
-  "application/vnd.google-apps.site",
-  "application/vnd.google-apps.drawing",
-]);
+// DL対象のmimeType（ホワイトリスト方式）
+// Google Apps形式: exportでテキスト変換してDL
+const EXPORT_MIME_MAP: Record<string, { exportMime: string; ext: string }> = {
+  "application/vnd.google-apps.document": { exportMime: "text/plain", ext: ".txt" },
+  "application/vnd.google-apps.spreadsheet": { exportMime: "text/csv", ext: ".csv" },
+  "application/vnd.google-apps.presentation": { exportMime: "text/plain", ext: ".txt" },
+};
+
+// バイナリ/テキスト形式: そのままDL
+const DIRECT_DL_MIME_MAP: Record<string, string> = {
+  "application/pdf": ".pdf",
+  "text/plain": ".txt",
+  "text/markdown": ".md",
+  "text/csv": ".csv",
+  "application/json": ".json",
+};
 
 interface DriveChange {
   fileId: string;
@@ -47,49 +56,50 @@ function gwsExec(args: string): unknown {
   return JSON.parse(result);
 }
 
-/** DL対象かどうか判定 */
-function isDownloadTarget(mimeType: string): boolean {
-  if (SKIP_MIME_TYPES.has(mimeType)) return false;
-  for (const prefix of SKIP_MIME_PREFIXES) {
-    if (mimeType.startsWith(prefix)) return false;
-  }
-  return true;
+/** DL対象かどうか判定（ホワイトリスト方式） */
+export function isDownloadTarget(mimeType: string): boolean {
+  return mimeType in EXPORT_MIME_MAP || mimeType in DIRECT_DL_MIME_MAP;
+}
+
+/** ファイル名をファイルシステム・シェル安全な文字列に変換 */
+export function makeSafeName(name: string): string {
+  return name.replace(/[/\\:*?"<>|']/g, "_");
+}
+
+/** ファイル名に拡張子を付加（既に同じ拡張子なら付加しない） */
+export function addExtIfNeeded(name: string, ext: string): string {
+  return name.toLowerCase().endsWith(ext.toLowerCase()) ? name : `${name}${ext}`;
 }
 
 /** ファイルを1件DL */
 function downloadFile(fileId: string, name: string, mimeType: string): string | null {
-  const safeName = name.replace(/[/\\:*?"<>|]/g, "_");
+  const safeName = makeSafeName(name);
 
   try {
-    if (mimeType === "application/vnd.google-apps.document") {
-      const outPath = path.join(DL_DIR, `${safeName}.txt`);
+    const exportInfo = EXPORT_MIME_MAP[mimeType];
+    if (exportInfo) {
+      // Google Apps形式: exportでテキスト変換
+      const outPath = path.join(DL_DIR, addExtIfNeeded(safeName, exportInfo.ext));
       execSync(
-        `${GWS} drive files export --params '{"fileId": "${fileId}", "mimeType": "text/plain"}' --output '${outPath}'`,
+        `${GWS} drive files export --params '{"fileId": "${fileId}", "mimeType": "${exportInfo.exportMime}"}' --output '${outPath}'`,
         { timeout: 30000 },
       );
       return outPath;
-    } else if (mimeType === "application/vnd.google-apps.spreadsheet") {
-      const outPath = path.join(DL_DIR, `${safeName}.csv`);
-      execSync(
-        `${GWS} drive files export --params '{"fileId": "${fileId}", "mimeType": "text/csv"}' --output '${outPath}'`,
-        { timeout: 30000 },
-      );
-      return outPath;
-    } else if (mimeType === "application/vnd.google-apps.presentation") {
-      const outPath = path.join(DL_DIR, `${safeName}.txt`);
-      execSync(
-        `${GWS} drive files export --params '{"fileId": "${fileId}", "mimeType": "text/plain"}' --output '${outPath}'`,
-        { timeout: 30000 },
-      );
-      return outPath;
-    } else {
-      const outPath = path.join(DL_DIR, safeName);
+    }
+
+    const ext = DIRECT_DL_MIME_MAP[mimeType];
+    if (ext) {
+      // バイナリ/テキスト形式: そのままDL
+      const outPath = path.join(DL_DIR, addExtIfNeeded(safeName, ext));
       execSync(
         `${GWS} drive files get --params '{"fileId": "${fileId}", "alt": "media"}' --output '${outPath}'`,
         { timeout: 30000 },
       );
       return outPath;
     }
+
+    // ホワイトリストにない → DLしない（ここには到達しないはず）
+    return null;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error(`[gdrive-sync] DLエラー: ${name} — ${msg}`);
@@ -198,7 +208,6 @@ export async function syncChanges(): Promise<{
   }
 
   // DL → インデックス（1件ずつ順次）
-  const SUPPORTED_EXTS = new Set([".md", ".txt", ".pdf", ".json", ".csv"]);
   let dlCount = 0;
   let indexCount = 0;
   let errorCount = 0;
@@ -210,10 +219,13 @@ export async function syncChanges(): Promise<{
       errorCount++;
       continue;
     }
-    dlCount++;
 
-    const ext = path.extname(dlPath).toLowerCase();
-    if (!SUPPORTED_EXTS.has(ext)) continue;
+    if (!fs.existsSync(dlPath)) {
+      errorCount++;
+      console.error(`[gdrive-sync] DL後ファイル不在: ${file.name} — ${dlPath}`);
+      continue;
+    }
+    dlCount++;
 
     try {
       const doc = await loadDocument(dlPath);
@@ -292,7 +304,66 @@ function listAllFiles(): DriveFile[] {
   return allFiles;
 }
 
-/** 初回一括DL: Google Driveの全対象ファイルをDLしてインデックス作成 */
+/** ファイルを1件DL（非同期版） */
+async function downloadFileAsync(fileId: string, name: string, mimeType: string): Promise<string | null> {
+  const safeName = makeSafeName(name);
+
+  try {
+    const exportInfo = EXPORT_MIME_MAP[mimeType];
+    if (exportInfo) {
+      const outPath = path.join(DL_DIR, addExtIfNeeded(safeName, exportInfo.ext));
+      await execAsync(
+        `${GWS} drive files export --params '{"fileId": "${fileId}", "mimeType": "${exportInfo.exportMime}"}' --output '${outPath}'`,
+        { timeout: 30000 },
+      );
+      return outPath;
+    }
+
+    const ext = DIRECT_DL_MIME_MAP[mimeType];
+    if (ext) {
+      const outPath = path.join(DL_DIR, addExtIfNeeded(safeName, ext));
+      await execAsync(
+        `${GWS} drive files get --params '{"fileId": "${fileId}", "alt": "media"}' --output '${outPath}'`,
+        { timeout: 30000 },
+      );
+      return outPath;
+    }
+
+    return null;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error(`[gdrive-sync] DLエラー: ${name} — ${msg}`);
+    return null;
+  }
+}
+
+/** 1件のインデックス処理（テキスト抽出→エンベディング→DB保存） */
+async function indexFile(dlPath: string, fileName: string): Promise<boolean> {
+  try {
+    const doc = await loadDocument(dlPath);
+    const textChunks = doc.format === "md" ? splitMarkdown(doc.text) : splitText(doc.text);
+    if (textChunks.length === 0) return false;
+
+    removeSource(doc.source);
+    const embeddings = await generateEmbeddings(textChunks, "RETRIEVAL_DOCUMENT");
+    const chunks = textChunks.map((text, j) => ({
+      text,
+      source: doc.source,
+      chunkIndex: j,
+    }));
+    addChunks(chunks, embeddings);
+
+    const stat = fs.statSync(dlPath);
+    upsertSourceFile(doc.source, dlPath, stat.mtimeMs);
+    return true;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error(`[gdrive-bulk] インデックスエラー: ${fileName} — ${msg}`);
+    return false;
+  }
+}
+
+/** 初回一括DL: DLとインデックスをパイプライン並行処理 */
 export async function bulkDownload(): Promise<{
   total: number;
   downloaded: number;
@@ -303,52 +374,49 @@ export async function bulkDownload(): Promise<{
   const files = listAllFiles();
   console.log(`DL対象: ${files.length}件`);
 
+  // 前回の残留ファイルを削除してクリーンスタート
+  if (fs.existsSync(DL_DIR)) {
+    fs.rmSync(DL_DIR, { recursive: true, force: true });
+  }
   fs.mkdirSync(DL_DIR, { recursive: true });
 
-  const SUPPORTED_EXTS = new Set([".md", ".txt", ".pdf", ".json", ".csv"]);
   let dlCount = 0;
   let indexCount = 0;
   let errorCount = 0;
 
+  // インデックス処理キュー（1件ずつ直列で処理。DLとは並行で動く）
+  let indexChain = Promise.resolve();
+
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
     if ((i + 1) % 100 === 0) {
-      console.log(`  進捗: ${i + 1}/${files.length}`);
+      console.log(`  DL進捗: ${i + 1}/${files.length}`);
     }
 
-    const dlPath = downloadFile(file.id, file.name, file.mimeType);
+    // DLは1件ずつシングルでawait（待ち時間中にインデックス処理が進む）
+    const dlPath = await downloadFileAsync(file.id, file.name, file.mimeType);
     if (!dlPath) {
       errorCount++;
       continue;
     }
+
+    if (!fs.existsSync(dlPath)) {
+      errorCount++;
+      console.error(`[gdrive-bulk] DL後ファイル不在: ${file.name} — ${dlPath}`);
+      continue;
+    }
     dlCount++;
 
-    const ext = path.extname(dlPath).toLowerCase();
-    if (!SUPPORTED_EXTS.has(ext)) continue;
-
-    try {
-      const doc = await loadDocument(dlPath);
-      const textChunks = doc.format === "md" ? splitMarkdown(doc.text) : splitText(doc.text);
-      if (textChunks.length === 0) continue;
-
-      removeSource(doc.source);
-      const embeddings = await generateEmbeddings(textChunks, "RETRIEVAL_DOCUMENT");
-      const chunks = textChunks.map((text, j) => ({
-        text,
-        source: doc.source,
-        chunkIndex: j,
-      }));
-      addChunks(chunks, embeddings);
-
-      const stat = fs.statSync(dlPath);
-      upsertSourceFile(doc.source, dlPath, stat.mtimeMs);
-      indexCount++;
-    } catch (e) {
-      errorCount++;
-      const msg = e instanceof Error ? e.message : String(e);
-      console.error(`[gdrive-bulk] インデックスエラー: ${file.name} — ${msg}`);
-    }
+    // インデックスをキューに追加（前の処理が終わってから次が始まる）
+    indexChain = indexChain.then(async () => {
+      const ok = await indexFile(dlPath, file.name);
+      if (ok) indexCount++;
+    });
   }
+
+  // 全DL完了後、残りのインデックス処理の完了を待つ
+  console.log(`DL完了: ${dlCount}件。インデックス処理の完了を待機中...`);
+  await indexChain;
 
   // 後片付け
   if (fs.existsSync(DL_DIR)) {
