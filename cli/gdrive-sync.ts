@@ -11,6 +11,7 @@ import {
   initChangeToken,
   checkChanges,
   syncChanges,
+  bulkDownload,
 } from "../lib/rag/gdriveSync";
 
 /** 初回トークン取得 */
@@ -67,6 +68,19 @@ async function sync(): Promise<void> {
   console.log(`\nSoftMatcha 2の再構築が必要な場合は build_softmatcha_index を実行してください`);
 }
 
+/** 初回一括DL＋インデックス作成 */
+async function bulk(): Promise<void> {
+  initDb();
+  const result = await bulkDownload();
+
+  console.log(`\n完了:`);
+  console.log(`  対象: ${result.total}件`);
+  console.log(`  DL: ${result.downloaded}件`);
+  console.log(`  インデックス: ${result.indexed}件`);
+  console.log(`  エラー: ${result.errors}件`);
+  console.log(`\nSoftMatcha 2の再構築が必要な場合は build_softmatcha_index を実行してください`);
+}
+
 // メインエントリー
 const [, , command] = process.argv;
 
@@ -80,11 +94,15 @@ switch (command) {
   case "sync":
     sync();
     break;
+  case "bulk":
+    bulk();
+    break;
   default:
-    console.log(`Google Drive差分同期CLI
+    console.log(`Google Drive同期CLI
 
 使い方:
-  npx tsx cli/gdrive-sync.ts init    初回セットアップ（changeトークン取得・保存）
+  npx tsx cli/gdrive-sync.ts bulk    初回一括DL＋インデックス作成（全ファイル）
+  npx tsx cli/gdrive-sync.ts init    changeトークン取得・保存（bulkで自動設定済みなら不要）
   npx tsx cli/gdrive-sync.ts check   変更を検出してレポート（DLしない）
   npx tsx cli/gdrive-sync.ts sync    変更を検出 → DL → インデックス更新`);
 }

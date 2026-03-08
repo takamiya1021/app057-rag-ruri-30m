@@ -254,3 +254,113 @@ export async function syncChanges(): Promise<{
 export function isGdriveSyncEnabled(): boolean {
   return !!getGdriveChangeToken();
 }
+
+interface DriveFile {
+  id: string;
+  name: string;
+  mimeType: string;
+}
+
+/** Google Driveの全ファイル一覧を取得（DL対象のみ） */
+function listAllFiles(): DriveFile[] {
+  const allFiles: DriveFile[] = [];
+  let pageToken: string | undefined;
+
+  while (true) {
+    const params: Record<string, unknown> = {
+      q: "trashed=false",
+      pageSize: 1000,
+      fields: "files(id,name,mimeType),nextPageToken",
+    };
+    if (pageToken) params.pageToken = pageToken;
+
+    const result = gwsExec(
+      `drive files list --params '${JSON.stringify(params)}'`,
+    ) as { files?: DriveFile[]; nextPageToken?: string };
+
+    if (result.files) {
+      for (const f of result.files) {
+        if (isDownloadTarget(f.mimeType)) {
+          allFiles.push(f);
+        }
+      }
+    }
+    if (!result.nextPageToken) break;
+    pageToken = result.nextPageToken;
+  }
+
+  return allFiles;
+}
+
+/** 初回一括DL: Google Driveの全対象ファイルをDLしてインデックス作成 */
+export async function bulkDownload(): Promise<{
+  total: number;
+  downloaded: number;
+  indexed: number;
+  errors: number;
+}> {
+  console.log("Google Driveファイル一覧を取得中...");
+  const files = listAllFiles();
+  console.log(`DL対象: ${files.length}件`);
+
+  fs.mkdirSync(DL_DIR, { recursive: true });
+
+  const SUPPORTED_EXTS = new Set([".md", ".txt", ".pdf", ".json", ".csv"]);
+  let dlCount = 0;
+  let indexCount = 0;
+  let errorCount = 0;
+
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    if ((i + 1) % 100 === 0) {
+      console.log(`  進捗: ${i + 1}/${files.length}`);
+    }
+
+    const dlPath = downloadFile(file.id, file.name, file.mimeType);
+    if (!dlPath) {
+      errorCount++;
+      continue;
+    }
+    dlCount++;
+
+    const ext = path.extname(dlPath).toLowerCase();
+    if (!SUPPORTED_EXTS.has(ext)) continue;
+
+    try {
+      const doc = await loadDocument(dlPath);
+      const textChunks = doc.format === "md" ? splitMarkdown(doc.text) : splitText(doc.text);
+      if (textChunks.length === 0) continue;
+
+      removeSource(doc.source);
+      const embeddings = await generateEmbeddings(textChunks, "RETRIEVAL_DOCUMENT");
+      const chunks = textChunks.map((text, j) => ({
+        text,
+        source: doc.source,
+        chunkIndex: j,
+      }));
+      addChunks(chunks, embeddings);
+
+      const stat = fs.statSync(dlPath);
+      upsertSourceFile(doc.source, dlPath, stat.mtimeMs);
+      indexCount++;
+    } catch (e) {
+      errorCount++;
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error(`[gdrive-bulk] インデックスエラー: ${file.name} — ${msg}`);
+    }
+  }
+
+  // 後片付け
+  if (fs.existsSync(DL_DIR)) {
+    fs.rmSync(DL_DIR, { recursive: true, force: true });
+  }
+
+  // トークン保存（bulk後は差分同期に移行できるように）
+  const tokenResult = gwsExec("drive changes getStartPageToken") as { startPageToken?: string };
+  if (tokenResult.startPageToken) {
+    setGdriveChangeToken(tokenResult.startPageToken);
+    console.log(`差分同期トークン保存: ${tokenResult.startPageToken}`);
+  }
+
+  return { total: files.length, downloaded: dlCount, indexed: indexCount, errors: errorCount };
+}
