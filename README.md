@@ -78,7 +78,7 @@ SoftMatcha 2（ソフトパターンマッチ） → 「フレーズの類似パ
 - **3つのインターフェース** — MCP サーバー / Web UI / CLI
 - **軽量ストレージ** — SQLite + sqlite-vec（外部DBサーバー不要。参考: Vault約1,200ファイル + Google Drive約1,200ファイルで約75MB）
 - **インデックス自動管理** — ファイルの更新・削除を検出し、差分同期が可能
-- **Google Drive対応** — gws CLI経由でGoogle Driveのファイルをインデックス。差分同期も自動実行
+- **Google Drive対応** — gws CLI経由でGoogle Driveのファイルをインデックス。差分同期も自動実行（gws CLIコマンドの直接実行で完結）
 
 ### トリプルハイブリッド検索とは
 
@@ -381,7 +381,7 @@ npx tsx cli/gdrive-sync.ts sync
 ```
 
 > **Note**
-> [gws CLI](https://github.com/nichochar/gws)（Google Workspace CLI）のインストールと認証が必要です。
+> [gws CLI](https://github.com/googleworkspace/cli)（Google Workspace CLI）のインストールと認証が必要です。gws CLIコマンドの直接実行で連携しています。
 
 <p align="right">(<a href="#目次">トップに戻る</a>)</p>
 
