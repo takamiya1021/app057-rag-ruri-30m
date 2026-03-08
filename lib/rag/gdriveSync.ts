@@ -29,14 +29,16 @@ const EXPORT_MIME_MAP: Record<string, { exportMime: string; ext: string }> = {
   "application/vnd.google-apps.presentation": { exportMime: "text/plain", ext: ".txt" },
 };
 
-// バイナリ/テキスト形式: そのままDL
+// バイナリ/テキスト形式: そのままDL（PDFは除外: 請求書・領収書等が多くノイズになる）
 const DIRECT_DL_MIME_MAP: Record<string, string> = {
-  "application/pdf": ".pdf",
   "text/plain": ".txt",
   "text/markdown": ".md",
   "text/csv": ".csv",
   "application/json": ".json",
 };
+
+// ファイルサイズ上限（10MB）
+const MAX_FILE_SIZE = 10 * 1024 * 1024;
 
 interface DriveChange {
   fileId: string;
@@ -271,18 +273,20 @@ interface DriveFile {
   id: string;
   name: string;
   mimeType: string;
+  size?: string; // Google Drive APIはstring型で返す
 }
 
 /** Google Driveの全ファイル一覧を取得（DL対象のみ） */
-function listAllFiles(): DriveFile[] {
+function listAllFiles(limit?: number): DriveFile[] {
   const allFiles: DriveFile[] = [];
   let pageToken: string | undefined;
+  let skippedSize = 0;
 
   while (true) {
     const params: Record<string, unknown> = {
       q: "trashed=false",
       pageSize: 1000,
-      fields: "files(id,name,mimeType),nextPageToken",
+      fields: "files(id,name,mimeType,size),nextPageToken",
     };
     if (pageToken) params.pageToken = pageToken;
 
@@ -292,8 +296,17 @@ function listAllFiles(): DriveFile[] {
 
     if (result.files) {
       for (const f of result.files) {
-        if (isDownloadTarget(f.mimeType)) {
-          allFiles.push(f);
+        if (!isDownloadTarget(f.mimeType)) continue;
+        // Google Apps形式はsizeがない（export時にテキスト変換されるため）
+        const fileSize = f.size ? parseInt(f.size, 10) : 0;
+        if (fileSize > MAX_FILE_SIZE) {
+          skippedSize++;
+          continue;
+        }
+        allFiles.push(f);
+        if (limit && allFiles.length >= limit) {
+          if (skippedSize > 0) console.log(`  サイズ超過スキップ: ${skippedSize}件`);
+          return allFiles;
         }
       }
     }
@@ -301,6 +314,7 @@ function listAllFiles(): DriveFile[] {
     pageToken = result.nextPageToken;
   }
 
+  if (skippedSize > 0) console.log(`  サイズ超過スキップ: ${skippedSize}件`);
   return allFiles;
 }
 
@@ -338,9 +352,11 @@ async function downloadFileAsync(fileId: string, name: string, mimeType: string)
 }
 
 /** 1件のインデックス処理（テキスト抽出→エンベディング→DB保存） */
-async function indexFile(dlPath: string, fileName: string): Promise<boolean> {
+async function indexFile(dlPath: string, fileName: string, gdriveFileId?: string): Promise<boolean> {
   try {
     const doc = await loadDocument(dlPath);
+    // 空 or ほぼ無意味なテキストはスキップ（50文字未満）
+    if (!doc.text || doc.text.trim().length < 50) return false;
     const textChunks = doc.format === "md" ? splitMarkdown(doc.text) : splitText(doc.text);
     if (textChunks.length === 0) return false;
 
@@ -353,8 +369,13 @@ async function indexFile(dlPath: string, fileName: string): Promise<boolean> {
     }));
     addChunks(chunks, embeddings);
 
-    const stat = fs.statSync(dlPath);
-    upsertSourceFile(doc.source, dlPath, stat.mtimeMs);
+    // Google Drive経由はgdrive://パスで記録（ファイル削除後も消えない）
+    if (gdriveFileId) {
+      upsertSourceFile(doc.source, `gdrive://${gdriveFileId}`, Date.now());
+    } else {
+      const stat = fs.statSync(dlPath);
+      upsertSourceFile(doc.source, dlPath, stat.mtimeMs);
+    }
     return true;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -364,15 +385,15 @@ async function indexFile(dlPath: string, fileName: string): Promise<boolean> {
 }
 
 /** 初回一括DL: DLとインデックスをパイプライン並行処理 */
-export async function bulkDownload(): Promise<{
+export async function bulkDownload(limit?: number): Promise<{
   total: number;
   downloaded: number;
   indexed: number;
   errors: number;
 }> {
   console.log("Google Driveファイル一覧を取得中...");
-  const files = listAllFiles();
-  console.log(`DL対象: ${files.length}件`);
+  const files = listAllFiles(limit);
+  console.log(`DL対象: ${files.length}件${limit ? ` (limit: ${limit})` : ""}`);
 
   // 前回の残留ファイルを削除してクリーンスタート
   if (fs.existsSync(DL_DIR)) {
@@ -407,9 +428,10 @@ export async function bulkDownload(): Promise<{
     }
     dlCount++;
 
-    // インデックスをキューに追加（前の処理が終わってから次が始まる）
+    // インデックスをキューに追加（gdrive://パスで記録）
+    const fileId = file.id;
     indexChain = indexChain.then(async () => {
-      const ok = await indexFile(dlPath, file.name);
+      const ok = await indexFile(dlPath, file.name, fileId);
       if (ok) indexCount++;
     });
   }

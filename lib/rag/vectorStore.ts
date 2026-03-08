@@ -577,6 +577,9 @@ export function getStaleOrDeletedSources(): { stale: Array<{ source: string; fil
   const deleted: string[] = [];
 
   for (const row of rows) {
+    // Google Drive経由のソースはローカルファイルが存在しない（正常）
+    if (row.file_path.startsWith("gdrive://")) continue;
+
     try {
       const stat = fs.statSync(row.file_path);
       if (stat.mtimeMs > row.mtime_ms) {

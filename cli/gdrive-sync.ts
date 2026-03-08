@@ -2,9 +2,10 @@
 // 共有ライブラリ lib/rag/gdriveSync.ts を使用
 //
 // 使い方:
-//   npx tsx cli/gdrive-sync.ts init       — 初回: changeトークンを取得・保存（DLしない）
-//   npx tsx cli/gdrive-sync.ts check      — 変更を検出してレポート（DLしない）
-//   npx tsx cli/gdrive-sync.ts sync       — 変更を検出 → DL → インデックス更新
+//   npx tsx cli/gdrive-sync.ts init          — 初回: changeトークンを取得・保存
+//   npx tsx cli/gdrive-sync.ts check         — 変更を検出してレポート
+//   npx tsx cli/gdrive-sync.ts sync          — 変更を検出 → DL → インデックス更新
+//   npx tsx cli/gdrive-sync.ts bulk [limit]  — 一括DL＋インデックス作成
 
 import { initDb } from "../lib/rag/vectorStore";
 import {
@@ -68,10 +69,10 @@ async function sync(): Promise<void> {
   console.log(`\nSoftMatcha 2の再構築が必要な場合は build_softmatcha_index を実行してください`);
 }
 
-/** 初回一括DL＋インデックス作成 */
-async function bulk(): Promise<void> {
+/** 一括DL＋インデックス作成 */
+async function bulk(limit?: number): Promise<void> {
   initDb();
-  const result = await bulkDownload();
+  const result = await bulkDownload(limit);
 
   console.log(`\n完了:`);
   console.log(`  対象: ${result.total}件`);
@@ -82,7 +83,7 @@ async function bulk(): Promise<void> {
 }
 
 // メインエントリー
-const [, , command] = process.argv;
+const [, , command, arg] = process.argv;
 
 switch (command) {
   case "init":
@@ -94,15 +95,21 @@ switch (command) {
   case "sync":
     sync();
     break;
-  case "bulk":
-    bulk();
+  case "bulk": {
+    const limit = arg ? parseInt(arg, 10) : undefined;
+    if (arg && (!limit || isNaN(limit))) {
+      console.error(`無効なlimit値: ${arg}`);
+      process.exit(1);
+    }
+    bulk(limit);
     break;
+  }
   default:
     console.log(`Google Drive同期CLI
 
 使い方:
-  npx tsx cli/gdrive-sync.ts bulk    初回一括DL＋インデックス作成（全ファイル）
-  npx tsx cli/gdrive-sync.ts init    changeトークン取得・保存（bulkで自動設定済みなら不要）
-  npx tsx cli/gdrive-sync.ts check   変更を検出してレポート（DLしない）
-  npx tsx cli/gdrive-sync.ts sync    変更を検出 → DL → インデックス更新`);
+  npx tsx cli/gdrive-sync.ts bulk [limit]  一括DL＋インデックス作成
+  npx tsx cli/gdrive-sync.ts init          changeトークン取得・保存
+  npx tsx cli/gdrive-sync.ts check         変更を検出してレポート
+  npx tsx cli/gdrive-sync.ts sync          変更を検出 → DL → インデックス更新`);
 }

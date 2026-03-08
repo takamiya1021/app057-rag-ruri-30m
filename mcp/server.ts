@@ -40,6 +40,7 @@ export function createServer(): McpServer {
   let lastUpdateCheckMs = 0;
   const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1時間
   let updateRunning = false;
+  let softmatchaStaleNotified = false; // 24時間超過通知済みフラグ（1回だけ通知）
 
   /** 検索時にバックグラウンドで更新チェック+更新を実行（検索をブロックしない） */
   function triggerBackgroundUpdate(): void {
@@ -89,20 +90,8 @@ export function createServer(): McpServer {
           console.error("[auto-update] ruri+BM25差分更新完了");
         }
 
-        // 2. SoftMatcha 2の再構築（変更があった場合、または24時間経過）
-        const needsSoftmatchaRebuild = stale.length > 0 || deleted.length > 0 || gdriveChanged || isIndexStale();
-        if (needsSoftmatchaRebuild) {
-          const allChunks = getAllChunks();
-          if (allChunks.length > 0) {
-            console.error("[auto-update] SoftMatcha 2再構築開始");
-            const result = await buildSoftMatchaIndex(allChunks);
-            if (result.ok) {
-              console.error(`[auto-update] SoftMatcha 2再構築完了（${result.numTokens}トークン）`);
-            } else {
-              console.error(`[auto-update] SoftMatcha 2再構築失敗: ${result.error}`);
-            }
-          }
-        }
+        // 2. SoftMatcha 2: 再構築は検索結果で通知→手動実行（build_softmatcha_index）
+        //    triggerBackgroundUpdateでは自動再構築しない
       } catch (e) {
         console.error(`[auto-update] エラー: ${e}`);
       } finally {
@@ -264,11 +253,18 @@ export function createServer(): McpServer {
           text: r.chunk.text,
         }));
 
+        // SoftMatchaインデックスが24時間以上古い場合は初回のみ通知
+        let softmatchaNotice = "";
+        if (isIndexStale() && !softmatchaStaleNotified) {
+          softmatchaNotice = "\n\n⚠️ SoftMatchaインデックスが24時間以上古くなっています。再構築する場合は build_softmatcha_index を実行してください。";
+          softmatchaStaleNotified = true;
+        }
+
         return {
           content: [
             {
               type: "text",
-              text: JSON.stringify(formatted, null, 2),
+              text: JSON.stringify(formatted, null, 2) + softmatchaNotice,
             },
           ],
         };
@@ -628,6 +624,7 @@ export function createServer(): McpServer {
 
         const result = await buildSoftMatchaIndex(chunks);
         if (result.ok) {
+          softmatchaStaleNotified = false; // 通知フラグリセット
           return {
             content: [{
               type: "text",
