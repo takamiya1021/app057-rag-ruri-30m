@@ -163,7 +163,7 @@ function handleResponse(line: string): void {
   }
 }
 
-async function sendCommand(cmd: Record<string, unknown>): Promise<Record<string, unknown>> {
+async function sendCommand(cmd: Record<string, unknown>, timeoutMs = 60000): Promise<Record<string, unknown>> {
   await ensureProcess();
 
   if (!process_ || !process_.stdin) {
@@ -180,7 +180,7 @@ async function sendCommand(cmd: Record<string, unknown>): Promise<Record<string,
         pendingResolve = null;
         reject(new Error("SoftMatcha 2コマンドタイムアウト"));
       }
-    }, 60000);
+    }, timeoutMs);
   });
 }
 
@@ -205,10 +205,10 @@ export function buildCorpus(
 
   const fd = fs.openSync(corpusPath, "w");
   for (const chunk of chunks) {
-    // 改行→スペース、制御文字・バイナリ除去（MeCabトークナイザ保護）
+    // 改行・制御文字・Unicode行区切りを除去（splitlines()とreadline()の不一致を防ぐ）
     const cleanText = chunk.text
       .replace(/\n/g, " ")
-      .replace(/[\x00-\x08\x0e-\x1f\x7f]/g, "")
+      .replace(/[\x00-\x08\x0b-\x1f\x7f\u2028\u2029]/g, "")
       .trim();
     const line = cleanText + "\n";
     const bytes = Buffer.byteLength(line, "utf-8");
@@ -283,12 +283,16 @@ export async function buildSoftMatchaIndex(
       fs.rmSync(stagingPath, { recursive: true });
     }
 
-    // 2. 別プロセスでインデックス構築
-    const result = await runBuildProcess(corpusPath, stagingPath);
+    // 2. bridge.py経由でインデックス構築（モデルロード済みの常駐プロセスを使う）
+    const result = await sendCommand({
+      action: "build",
+      corpus_path: corpusPath,
+      index_path: stagingPath,
+    }, 300000) as { ok: boolean; num_tokens?: number; error?: string };
 
     if (!result.ok) {
       buildInProgress = false;
-      return result;
+      return { ok: false, error: result.error };
     }
 
     // 3. アトミックにインデックスを入れ替え
@@ -300,17 +304,15 @@ export async function buildSoftMatchaIndex(
 
     recordBuildTime();
 
-    // 4. 検索ブリッジにリロードを通知（起動している場合）
-    if (ready) {
-      try {
-        await sendCommand({ action: "load", index_path: indexPath, map_path: mapPath });
-      } catch (e) {
-        console.error(`[softmatcha] リロード通知失敗（次回検索時にロードされます）: ${e}`);
-      }
+    // 4. 新しいインデックスをロード
+    try {
+      await sendCommand({ action: "load", index_path: indexPath, map_path: mapPath });
+    } catch (e) {
+      console.error(`[softmatcha] リロード失敗（次回検索時にロードされます）: ${e}`);
     }
 
     buildInProgress = false;
-    return { ok: true, numTokens: result.numTokens };
+    return { ok: true, numTokens: result.num_tokens };
   } catch (e) {
     buildInProgress = false;
     const msg = e instanceof Error ? e.message : String(e);
@@ -318,57 +320,6 @@ export async function buildSoftMatchaIndex(
   }
 }
 
-/** softmatcha-index CLI を別プロセスで実行 */
-function runBuildProcess(
-  corpusPath: string,
-  indexPath: string,
-): Promise<{ ok: boolean; numTokens?: number; error?: string }> {
-  return new Promise((resolve) => {
-    const uvPath = path.join(os.homedir(), ".local/bin/uv");
-    const args = [
-      "run", "softmatcha-index",
-      "--backend", "fasttext",
-      "--model", "fasttext-ja-vectors",
-      "--index", indexPath,
-      "--mem_size", "500",
-      "--mem_size_ex", "100",
-      corpusPath,
-    ];
-
-    console.error(`[softmatcha] インデックス構築開始（バックグラウンド）`);
-    const proc = spawn(uvPath, args, {
-      cwd: SOFTMATCHA_DIR,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-
-    let stderrOutput = "";
-    proc.stderr?.on("data", (data: Buffer) => {
-      const line = data.toString();
-      stderrOutput += line;
-      // 進捗をログに出力
-      if (line.includes("Tokenize") || line.includes("Phase") || line.includes("finished")) {
-        console.error(`[softmatcha-build] ${line.trim()}`);
-      }
-    });
-
-    proc.on("exit", (code) => {
-      if (code === 0) {
-        // トークン数をログから抽出
-        const match = stderrOutput.match(/#Tokens\s*:\s*([\d,]+)/);
-        const numTokens = match ? parseInt(match[1].replace(/,/g, ""), 10) : undefined;
-        console.error(`[softmatcha] インデックス構築完了`);
-        resolve({ ok: true, numTokens });
-      } else {
-        console.error(`[softmatcha] インデックス構築失敗 (code: ${code})`);
-        resolve({ ok: false, error: `構築プロセス終了コード: ${code}` });
-      }
-    });
-
-    proc.on("error", (err) => {
-      resolve({ ok: false, error: err.message });
-    });
-  });
-}
 
 // =====================================================
 // 検索

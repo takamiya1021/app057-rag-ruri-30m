@@ -102,7 +102,7 @@ class SoftMatchaBridge:
             index_path,
             os.path.abspath(corpus_path),
             self.tokenizer,
-            num_workers=os.cpu_count(),
+            num_workers=min(2, os.cpu_count() or 1),
             buffer_size=2500,
             max_vocab=2**19,
         )

@@ -8,9 +8,17 @@ import {
   removeSource,
   getStatus,
   upsertSourceFile,
+  getStaleOrDeletedSources,
+  getAllChunks,
 } from "../lib/rag/vectorStore";
 import { loadDocument } from "../lib/rag/documentLoader";
 import { splitText, splitMarkdown } from "../lib/rag/chunker";
+import {
+  buildSoftMatchaIndex,
+  searchSoftMatcha,
+  hasSoftMatchaIndex,
+  getSoftMatchaStatus,
+} from "../lib/rag/softmatcha";
 import { streamText } from "ai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { promises as fs } from "fs";
@@ -257,6 +265,143 @@ async function addDir(dirPath: string, batchSize: number) {
   console.log(`完了: ${successCount}ファイル, ${totalChunks}チャンク（エラー: ${errorCount}件）`);
 }
 
+/** トリプルハイブリッド検索（AI回答なし） */
+async function searchOnly(query: string, topK: number) {
+  initDb();
+
+  console.log(`検索: "${query}" (top ${topK})`);
+  const queryEmbedding = await generateEmbedding(query, "RETRIEVAL_QUERY");
+
+  // SoftMatcha検索（インデックスがあれば）
+  let softmatchaResults: Array<{ score: number; chunk_ids: number[] }> | undefined;
+  if (hasSoftMatchaIndex()) {
+    try {
+      const smResults = await searchSoftMatcha(query, topK * 2);
+      if (smResults.length > 0) {
+        softmatchaResults = smResults.map((r) => ({
+          score: r.score,
+          chunk_ids: r.chunk_ids,
+        }));
+      }
+    } catch (e) {
+      console.error(`[softmatcha] 検索スキップ: ${e}`);
+    }
+  }
+
+  const results = hybridSearch(queryEmbedding, query, topK, softmatchaResults);
+
+  if (results.length === 0) {
+    console.log("該当するドキュメントが見つかりませんでした");
+    return;
+  }
+
+  results.forEach((r, i) => {
+    const ranks = [];
+    if (r.vectorRank !== null) ranks.push(`Vec:${r.vectorRank}`);
+    if (r.bm25Rank !== null) ranks.push(`BM25:${r.bm25Rank}`);
+    if (r.softmatchaRank !== null) ranks.push(`SM:${r.softmatchaRank}`);
+    console.log(`\n[${i + 1}] ${r.chunk.source} (スコア: ${r.score.toFixed(4)}, ${ranks.join(", ")})`);
+    console.log(r.chunk.text.slice(0, 200));
+  });
+}
+
+/** SoftMatchaインデックス構築 */
+async function buildSoftmatcha() {
+  initDb();
+
+  const chunks = getAllChunks();
+  if (chunks.length === 0) {
+    console.error("チャンクがありません。先にドキュメントを追加してください。");
+    process.exit(1);
+  }
+
+  console.log(`SoftMatchaインデックス構築開始（${chunks.length}チャンク）`);
+  const result = await buildSoftMatchaIndex(chunks);
+
+  if (result.ok) {
+    console.log(`完了（${chunks.length}チャンク, ${result.numTokens}トークン）`);
+  } else {
+    console.error(`エラー: ${result.error}`);
+    process.exit(1);
+  }
+}
+
+/** 更新チェック（レポートのみ） */
+function checkUpdates() {
+  initDb();
+
+  const { stale, deleted } = getStaleOrDeletedSources();
+
+  if (stale.length === 0 && deleted.length === 0) {
+    console.log("すべてのインデックスは最新です");
+    return;
+  }
+
+  if (stale.length > 0) {
+    console.log(`更新されたファイル（${stale.length}件）:`);
+    for (const s of stale) {
+      console.log(`  - ${s.source}`);
+    }
+  }
+  if (deleted.length > 0) {
+    console.log(`削除されたファイル（${deleted.length}件）:`);
+    for (const d of deleted) {
+      console.log(`  - ${d}`);
+    }
+  }
+  console.log("\nsync-updates を実行するとインデックスを更新できます。");
+}
+
+/** 更新同期（変更ファイルを再インデックス） */
+async function syncUpdates() {
+  initDb();
+
+  const { stale, deleted } = getStaleOrDeletedSources();
+
+  if (stale.length === 0 && deleted.length === 0) {
+    console.log("すべてのインデックスは最新です。更新不要。");
+    return;
+  }
+
+  // 削除されたファイルをインデックスから除去
+  for (const source of deleted) {
+    const count = removeSource(source);
+    console.log(`削除: ${source}（${count}チャンク除去）`);
+  }
+
+  // 更新されたファイルを再インデックス
+  for (const { source, filePath } of stale) {
+    try {
+      const doc = await loadDocument(filePath);
+      const stat = await fs.stat(filePath);
+      removeSource(source);
+
+      const textChunks =
+        doc.format === "md" ? splitMarkdown(doc.text) : splitText(doc.text);
+
+      if (textChunks.length === 0) {
+        console.log(`スキップ: ${source}（テキストなし）`);
+        continue;
+      }
+
+      const embeddings = await generateEmbeddings(textChunks, "RETRIEVAL_DOCUMENT");
+      const chunks = textChunks.map((text, i) => ({
+        text,
+        source,
+        chunkIndex: i,
+      }));
+      const ids = addChunks(chunks, embeddings);
+      upsertSourceFile(source, filePath, stat.mtimeMs);
+      console.log(`更新: ${source}（${ids.length}チャンク）`);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(`エラー: ${source} - ${msg}`);
+    }
+  }
+
+  console.log("同期完了");
+}
+
 /** インデックス状態表示 */
 function showStatus() {
   initDb();
@@ -321,6 +466,28 @@ switch (command) {
     remove(source);
     break;
   }
+  case "search": {
+    const sq = args.join(" ");
+    if (!sq) {
+      console.error("使い方: npx tsx cli/rag-cli.ts search <クエリ> [件数]");
+      process.exit(1);
+    }
+    const tk = args.length > 1 && !isNaN(Number(args[args.length - 1]))
+      ? parseInt(args.pop()!, 10)
+      : 5;
+    const searchQuery = args.join(" ");
+    searchOnly(searchQuery, tk);
+    break;
+  }
+  case "build-softmatcha":
+    buildSoftmatcha();
+    break;
+  case "check-updates":
+    checkUpdates();
+    break;
+  case "sync-updates":
+    syncUpdates();
+    break;
   case "status":
     showStatus();
     break;
@@ -329,8 +496,12 @@ switch (command) {
 
 使い方:
   npx tsx cli/rag-cli.ts ask <質問>                     質問してAI回答を取得
+  npx tsx cli/rag-cli.ts search <クエリ> [件数]          検索のみ（AI回答なし、デフォルト5件）
   npx tsx cli/rag-cli.ts add <ファイルパス>              文書を1件登録
   npx tsx cli/rag-cli.ts add-dir <ディレクトリ> [バッチサイズ]  ディレクトリ一括登録（デフォルト: バッチ50）
+  npx tsx cli/rag-cli.ts build-softmatcha               SoftMatchaインデックス構築
+  npx tsx cli/rag-cli.ts check-updates                  更新チェック（レポートのみ）
+  npx tsx cli/rag-cli.ts sync-updates                   更新同期（変更ファイルを再インデックス）
   npx tsx cli/rag-cli.ts list                           ソース一覧を表示
   npx tsx cli/rag-cli.ts remove <ソース名>              ソースを削除
   npx tsx cli/rag-cli.ts status                         インデックス状態を表示`);

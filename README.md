@@ -234,7 +234,7 @@ claude mcp add kuro-rag-ruri-30m npx tsx /path/to/app057-rag-ruri-30m/mcp/index.
 
 > **Note**
 > インデックスの更新（ruri+BM25差分更新・SoftMatcha再構築）は、検索時に1時間に1回バックグラウンドで自動実行されます。
-> 手動で即時更新したい場合は `check_updates` → `sync_updates` → `build_softmatcha_index` の順に実行してください。
+> 手動で即時更新したい場合はCLIで `check-updates` → `sync-updates` → `build-softmatcha` の順に実行してください。
 
 > **Note**
 > 「検索して」だけではファイル検索と区別がつかないため、必ず「**ラグ**」を含めてください。
@@ -258,24 +258,45 @@ claude mcp add kuro-rag-ruri-30m npx tsx /path/to/app057-rag-ruri-30m/mcp/index.
 
 ### 2. CLI で使う
 
+MCPツールの全機能はCLIでも利用できます。インデックス作成・更新はCLIで行い、MCPは検索専用として使う運用を推奨します。
+
+#### CLIコマンド一覧
+
+| コマンド | 説明 |
+|----------|------|
+| `ask <質問>` | RAG検索 + Gemini回答（※GEMINI_API_KEY必要） |
+| `search <クエリ> [件数]` | トリプルハイブリッド検索（AI回答なし、デフォルト5件） |
+| `add <ファイルパス>` | ファイルを1件インデックスに追加 |
+| `add-dir <ディレクトリ> [バッチサイズ]` | ディレクトリを再帰的にインデックス（デフォルト: バッチ50） |
+| `build-softmatcha` | SoftMatcha 2インデックスを構築/再構築 |
+| `check-updates` | ファイルの更新・削除を検出（レポートのみ） |
+| `sync-updates` | 検出された変更をインデックスに反映 |
+| `list` | インデックス済みソース一覧を表示 |
+| `remove <ソース名>` | ソースをインデックスから削除 |
+| `status` | インデックスの状態を表示 |
+
 ```bash
-# ドキュメントを追加
-npm run cli:add -- /path/to/document.md
+# 実行例
+npx tsx cli/rag-cli.ts add-dir ~/vaults 100
+npx tsx cli/rag-cli.ts build-softmatcha
+npx tsx cli/rag-cli.ts search "API設計"
+npx tsx cli/rag-cli.ts ask "Reactの設定方法は？"
+npx tsx cli/rag-cli.ts check-updates
+npx tsx cli/rag-cli.ts sync-updates
+```
 
-# ディレクトリを一括追加
-npx tsx cli/rag-cli.ts add-dir /path/to/directory
+#### Google Drive CLI
 
-# 検索
-npm run cli -- search "検索クエリ"
+| コマンド | 説明 |
+|----------|------|
+| `bulk` | 初回一括DL + インデックス作成（全ファイル） |
+| `init` | changeトークン取得・保存（bulkで自動設定済みなら不要） |
+| `check` | 変更を検出してレポート（DLしない） |
+| `sync` | 変更を検出 → DL → インデックス更新 |
 
-# 質問（RAG検索 + Gemini回答）※GEMINI_API_KEY必要
-npm run cli:ask -- "質問内容"
-
-# ソース一覧
-npm run cli:list
-
-# ステータス確認
-npm run cli:status
+```bash
+npx tsx cli/gdrive-sync.ts bulk
+npx tsx cli/gdrive-sync.ts sync
 ```
 
 ---
