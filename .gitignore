@@ -9,6 +9,7 @@ dist/
 .env*.local
 doc/*
 !doc/spec.md
+!doc/gdrive-index-guide.md
 note/
 png/
 *.tsbuildinfo
