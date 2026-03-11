@@ -144,6 +144,13 @@ claude mcp add kuro-rag-ruri-30m npx tsx /path/to/app057-rag-ruri-30m/mcp/index.
 | `rag://config` | 設定情報（インデックス対象ディレクトリ） |
 | `rag://softmatcha-status` | SoftMatcha 2の状態 |
 
+#### MCPの使い方
+
+| 方法 | 使い方 | 特徴 |
+|------|--------|------|
+| **MCP直接** | 「ドキュメントを検索して」「~/vaults をインデックスに追加して」 | Claude Codeがツールを直接呼び出す |
+| **スキル経由** | 「**ラグ**で〇〇を検索して」「**RAG**でインデックス作りたい」 | クエリ最適化（ひらがな→カタカナ等）やインデックス作成のガイドが自動で付く |
+
 ---
 
 ### 2. CLI
