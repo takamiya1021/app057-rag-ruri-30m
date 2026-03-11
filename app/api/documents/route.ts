@@ -2,7 +2,7 @@
 import { NextResponse } from "next/server";
 import { initDb, addChunks, listSources } from "@/lib/rag/vectorStore";
 import { loadDocument } from "@/lib/rag/documentLoader";
-import { splitText, splitMarkdown } from "@/lib/rag/chunker";
+import { chunkDocument } from "@/lib/rag/chunker";
 import { generateEmbeddings } from "@/lib/rag/embedding";
 import { applyDbConfig } from "@/lib/next/applyDbConfig";
 
@@ -37,9 +37,8 @@ export async function POST(request: Request) {
     // ファイル読み込み
     const doc = await loadDocument(filePath);
 
-    // チャンク分割（Markdownなら見出し分割、それ以外は段落分割）
-    const chunks =
-      doc.format === "md" ? splitMarkdown(doc.text) : splitText(doc.text);
+    // データ型に応じたチャンク分割
+    const chunks = chunkDocument(doc.text, doc.format);
 
     if (chunks.length === 0) {
       return NextResponse.json(

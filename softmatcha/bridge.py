@@ -7,6 +7,7 @@ TypeScript側からstdin/stdout JSON通信で呼び出す常駐プロセス。
   build  — コーパスファイルからSoftMatcha 2インデックスを構築
   search — フレーズでソフトパターンマッチ検索し、マッチしたチャンクIDとスコアを返す
   extract_phrases — MeCabでテキストからキーフレーズを抽出する
+  rerank — japanese-reranker-tiny-v2でクエリと候補テキストの関連度を計算する
   status — インデックス状態を返す
   shutdown — プロセス終了
 """
@@ -49,6 +50,9 @@ class SoftMatchaBridge:
         self.corpus_map = []  # [{chunk_id, byte_start, byte_end}, ...]
         self.index_path = None
         self.ready = False
+        # リランカー（遅延ロード）
+        self.reranker_model = None
+        self.reranker_tokenizer = None
 
     def load_models(self):
         """エンベディングモデルとトークナイザーをロード"""
@@ -281,6 +285,55 @@ class SoftMatchaBridge:
 
         return {"phrases": unique}
 
+    def load_reranker(self):
+        """リランカーモデルを遅延ロード（初回呼び出し時のみ）"""
+        if self.reranker_model is not None:
+            return
+        from transformers import AutoTokenizer, AutoModelForSequenceClassification
+        RERANKER_MODEL = "hotchpotch/japanese-reranker-tiny-v2"
+        logger.info(f"リランカーモデルをロード中: {RERANKER_MODEL}")
+        self.reranker_tokenizer = AutoTokenizer.from_pretrained(RERANKER_MODEL)
+        self.reranker_model = AutoModelForSequenceClassification.from_pretrained(RERANKER_MODEL)
+        self.reranker_model.eval()
+        logger.info("リランカーモデルのロード完了")
+
+    def rerank(self, query: str, texts: list, top_k: int = 5):
+        """クエリと候補テキストの関連度をスコアリングし、上位top_k件を返す"""
+        if not texts:
+            return {"scores": []}
+
+        self.load_reranker()
+
+        import torch
+        from torch.nn import Sigmoid
+
+        pairs = [(query, text) for text in texts]
+        inputs = self.reranker_tokenizer(
+            pairs,
+            padding=True,
+            truncation=True,
+            max_length=512,
+            return_tensors="pt",
+        )
+
+        with torch.no_grad():
+            logits = self.reranker_model(**inputs).logits
+
+        activation = Sigmoid()
+        scores = activation(logits).squeeze().tolist()
+
+        # スコアがスカラーの場合（テキスト1件）リスト化
+        if isinstance(scores, float):
+            scores = [scores]
+
+        scored = [
+            {"index": i, "relevance": float(scores[i])}
+            for i in range(len(scores))
+        ]
+        scored.sort(key=lambda x: x["relevance"], reverse=True)
+
+        return {"scores": scored[:top_k]}
+
     def handle_command(self, cmd: dict) -> dict:
         """コマンドを処理"""
         action = cmd.get("action", "")
@@ -316,6 +369,12 @@ class SoftMatchaBridge:
         elif action == "extract_phrases":
             text = cmd.get("text", "")
             return self.extract_phrases(text)
+
+        elif action == "rerank":
+            query = cmd["query"]
+            texts = cmd["texts"]
+            top_k = cmd.get("top_k", 5)
+            return self.rerank(query, texts, top_k)
 
         elif action == "status":
             return {

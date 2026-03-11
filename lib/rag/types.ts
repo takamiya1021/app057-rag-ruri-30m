@@ -39,7 +39,7 @@ export interface IndexStatus {
 export interface LoadedDocument {
   text: string;
   source: string;
-  format: "txt" | "md" | "pdf" | "json" | "csv";
+  format: "txt" | "md" | "pdf" | "json" | "csv" | "code";
 }
 
 /** ruri-v3のプレフィックス方式によるタスクタイプ */

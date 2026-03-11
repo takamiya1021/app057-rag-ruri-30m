@@ -90,6 +90,22 @@ function getLastBuildPath(): string {
 // 検索ブリッジ（常駐プロセス管理）
 // =====================================================
 
+// Nodeプロセス終了時にbridge.pyを自動停止（CLIやワンショットスクリプト用）
+let cleanupRegistered = false;
+function registerCleanup(): void {
+  if (cleanupRegistered) return;
+  cleanupRegistered = true;
+  const cleanup = () => {
+    if (process_ && !process_.killed) {
+      process_.kill();
+      process_ = null;
+    }
+  };
+  process.on("exit", cleanup);
+  process.on("SIGINT", cleanup);
+  process.on("SIGTERM", cleanup);
+}
+
 /** ブリッジプロセスを起動 */
 async function ensureProcess(): Promise<void> {
   if (process_ && !process_.killed) return;
@@ -101,7 +117,7 @@ async function ensureProcess(): Promise<void> {
 
   return new Promise((resolve, reject) => {
     const uvPath = path.join(os.homedir(), ".local/bin/uv");
-    process_ = spawn(uvPath, ["run", "python", BRIDGE_SCRIPT], {
+    process_ = spawn(uvPath, ["run", "--no-sync", "python", BRIDGE_SCRIPT], {
       cwd: SOFTMATCHA_DIR,
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -122,6 +138,9 @@ async function ensureProcess(): Promise<void> {
       process_ = null;
       rl = null;
     });
+
+    // Nodeプロセス終了時にbridge.pyも自動停止
+    registerCleanup();
 
     rl = readline.createInterface({ input: process_.stdout! });
 
@@ -339,8 +358,7 @@ async function searchPhrase(
   }) as SearchResponse;
 
   if (response.error) {
-    console.error(`[softmatcha] 検索エラー（"${phrase}"）: ${response.error}`);
-    return [];
+    throw new Error(response.error);
   }
 
   return response.results || [];
@@ -442,6 +460,21 @@ export async function getSoftMatchaStatus(): Promise<{
     building: buildInProgress,
     lastBuild: lastBuild?.toISOString() ?? null,
   };
+}
+
+/** bridge.py常駐プロセス経由でリランク（モデルは初回のみロード） */
+export async function rerankViaBridge(
+  query: string,
+  texts: string[],
+  topK: number,
+): Promise<Array<{ index: number; relevance: number }>> {
+  const result = await sendCommand({
+    action: "rerank",
+    query,
+    texts,
+    top_k: topK,
+  }) as { scores: Array<{ index: number; relevance: number }> };
+  return result.scores;
 }
 
 /** ブリッジプロセスを停止 */

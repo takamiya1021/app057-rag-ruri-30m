@@ -58,6 +58,11 @@ export async function generateEmbeddings(
 
   for (let i = 0; i < inputs.length; i += batchSize) {
     const batch = inputs.slice(i, i + batchSize);
+    const progress = Math.min(i + batchSize, inputs.length);
+    // バッチが複数回ある場合のみ進捗表示（1回で終わる場合は無意味なので省略）
+    if (inputs.length > batchSize) {
+      console.error(`  エンベディング: ${progress}/${inputs.length}`);
+    }
     const output = await ext(batch, {
       pooling: "mean",
       normalize: true,

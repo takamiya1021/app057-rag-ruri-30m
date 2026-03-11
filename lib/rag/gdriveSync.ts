@@ -15,7 +15,7 @@ const execAsync = promisify(exec);
 import { getGdriveChangeToken, setGdriveChangeToken } from "./config";
 import { removeSource, addChunks, upsertSourceFile } from "./vectorStore";
 import { loadDocument } from "./documentLoader";
-import { splitText, splitMarkdown } from "./chunker";
+import { chunkDocument } from "./chunker";
 import { generateEmbeddings } from "./embedding";
 
 const GWS = "gws";
@@ -231,7 +231,7 @@ export async function syncChanges(): Promise<{
 
     try {
       const doc = await loadDocument(dlPath);
-      const textChunks = doc.format === "md" ? splitMarkdown(doc.text) : splitText(doc.text);
+      const textChunks = chunkDocument(doc.text, doc.format);
       if (textChunks.length === 0) continue;
 
       removeSource(doc.source);
@@ -357,7 +357,7 @@ async function indexFile(dlPath: string, fileName: string, gdriveFileId?: string
     const doc = await loadDocument(dlPath);
     // 空 or ほぼ無意味なテキストはスキップ（50文字未満）
     if (!doc.text || doc.text.trim().length < 50) return false;
-    const textChunks = doc.format === "md" ? splitMarkdown(doc.text) : splitText(doc.text);
+    const textChunks = chunkDocument(doc.text, doc.format);
     if (textChunks.length === 0) return false;
 
     removeSource(doc.source);
@@ -410,9 +410,7 @@ export async function bulkDownload(limit?: number): Promise<{
 
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
-    if ((i + 1) % 100 === 0) {
-      console.log(`  DL進捗: ${i + 1}/${files.length}`);
-    }
+    console.error(`  [${i + 1}/${files.length}] ${file.name}`);
 
     // DLは1件ずつシングルでawait（待ち時間中にインデックス処理が進む）
     const dlPath = await downloadFileAsync(file.id, file.name, file.mimeType);

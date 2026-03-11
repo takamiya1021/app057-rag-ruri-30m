@@ -34,6 +34,25 @@ export function getCurrentDbPath(): string {
   return getDbPath();
 }
 
+/** データディレクトリごと削除してDBをリセット */
+export function resetDatabase(): { deleted: string } {
+  // DB接続を閉じる
+  if (db) {
+    db.close();
+    db = null;
+  }
+
+  const dbPath = getDbPath();
+  const dataDir = path.dirname(dbPath);
+
+  // データディレクトリごと削除
+  if (fs.existsSync(dataDir)) {
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+
+  return { deleted: dataDir };
+}
+
 /** DB初期化・テーブル作成 */
 export function initDb(): Database.Database {
   if (db) return db;
@@ -227,12 +246,20 @@ export function search(
   return results;
 }
 
+/** FTS5用にクエリをOR結合に変換（チャンク分割環境ではANDだとヒットしない） */
+function toFtsOrQuery(query: string): string {
+  const words = query.trim().split(/\s+/).filter(Boolean);
+  if (words.length <= 1) return query.trim();
+  return words.join(" OR ");
+}
+
 /** BM25キーワード検索（内部用） */
 function ftsSearch(
   query: string,
   topK: number,
 ): Array<{ id: number; chunk: StoredChunk; bm25Score: number }> {
   const database = getDb();
+  const ftsQuery = toFtsOrQuery(query);
 
   const rows = database
     .prepare(
@@ -252,7 +279,7 @@ function ftsSearch(
       LIMIT ?
     `,
     )
-    .all(query, topK) as Array<{
+    .all(ftsQuery, topK) as Array<{
     id: number;
     source: string;
     chunk_text: string;
@@ -556,6 +583,21 @@ export function upsertSourceFile(source: string, filePath: string, mtimeMs: numb
       mtime_ms = excluded.mtime_ms,
       indexed_at = datetime('now')
   `).run(source, filePath, mtimeMs);
+}
+
+/** ソース名からファイルパスのマップを取得 */
+export function getSourceFilePaths(sources: string[]): Record<string, string> {
+  if (sources.length === 0) return {};
+  const database = getDb();
+  const placeholders = sources.map(() => "?").join(",");
+  const rows = database
+    .prepare(`SELECT source, file_path FROM source_files WHERE source IN (${placeholders})`)
+    .all(...sources) as Array<{ source: string; file_path: string }>;
+  const map: Record<string, string> = {};
+  for (const row of rows) {
+    map[row.source] = row.file_path;
+  }
+  return map;
 }
 
 /** ソースのファイル情報を削除 */

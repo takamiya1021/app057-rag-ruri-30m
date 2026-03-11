@@ -1,0 +1,448 @@
+{
+  "timestamp": "2026-03-09T21:32:40.869Z",
+  "num_questions": 8,
+  "softmatcha_available": true,
+  "pool_size": 20,
+  "k_values": [
+    1,
+    3,
+    5
+  ],
+  "rrf_average": {
+    "hit_rate@1": 0.5,
+    "mrr@1": 0.5,
+    "precision@1": 0.5,
+    "recall@1": 0.12916666666666665,
+    "hit_rate@3": 0.875,
+    "mrr@3": 0.6666666666666667,
+    "precision@3": 0.49999999999999994,
+    "recall@3": 0.4625,
+    "hit_rate@5": 0.875,
+    "mrr@5": 0.6666666666666667,
+    "precision@5": 0.425,
+    "recall@5": 0.525
+  },
+  "rerank_average": {
+    "hit_rate@1": 0.375,
+    "mrr@1": 0.375,
+    "precision@1": 0.375,
+    "recall@1": 0.10416666666666666,
+    "hit_rate@3": 0.875,
+    "mrr@3": 0.625,
+    "precision@3": 0.5,
+    "recall@3": 0.38958333333333334,
+    "hit_rate@5": 0.875,
+    "mrr@5": 0.625,
+    "precision@5": 0.47500000000000003,
+    "recall@5": 0.45208333333333334
+  },
+  "per_question": [
+    {
+      "question": "Graphitiとは何か、どのようなフレームワークか",
+      "relevant_sources": [
+        "graphiti-note_done/graphiti_knowledge_graph_setup_guide.md",
+        "graphiti-note_done/GraphitiとNeo4jとGemini 2.5＋AIで構築する次世代知識グラフシステム - AIに記憶を与える.md",
+        "graphiti-note/cursor-graphiti-setup.md"
+      ],
+      "rrf_sources": [
+        "graphiti-note_done/graphiti_knowledge_graph_setup_guide.md",
+        "graphiti-note/cursor-graphiti-setup.md",
+        "graphiti-note_done/GraphitiとNeo4jとGemini 2.5＋AIで構築する次世代知識グラフシステム - AIに記憶を与える.md",
+        "graphiti-note_done/graphiti_knowledge_graph_setup_guide.md",
+        "graphiti-doc/mcp_stdio_openai_setup.md"
+      ],
+      "rerank_sources": [
+        "graphiti-note_done/graphiti_knowledge_graph_setup_guide.md",
+        "graphiti-doc/memory-system/archive/記憶システム考察.md",
+        "graphiti-note/cursor-graphiti-setup.md",
+        "graphiti-note_done/graphiti_knowledge_graph_setup_guide.md",
+        "graphiti-note_done/graphiti_knowledge_graph_setup_guide.md"
+      ],
+      "rrf_metrics": {
+        "hit_rate@1": 1,
+        "mrr@1": 1,
+        "precision@1": 1,
+        "recall@1": 0.3333333333333333,
+        "hit_rate@3": 1,
+        "mrr@3": 1,
+        "precision@3": 1,
+        "recall@3": 1,
+        "hit_rate@5": 1,
+        "mrr@5": 1,
+        "precision@5": 0.8,
+        "recall@5": 1
+      },
+      "rerank_metrics": {
+        "hit_rate@1": 1,
+        "mrr@1": 1,
+        "precision@1": 1,
+        "recall@1": 0.3333333333333333,
+        "hit_rate@3": 1,
+        "mrr@3": 1,
+        "precision@3": 0.6666666666666666,
+        "recall@3": 0.6666666666666666,
+        "hit_rate@5": 1,
+        "mrr@5": 1,
+        "precision@5": 0.8,
+        "recall@5": 0.6666666666666666
+      }
+    },
+    {
+      "question": "AIボットの記憶システムはどのような仕組みか",
+      "relevant_sources": [
+        "graphiti-note/左脳と右脳をつなぐ記憶システム.md",
+        "graphiti-note/左脳と右脳をつなぐ記憶システム_あおい視点.md",
+        "graphiti-doc/memory-system/archive/記憶システム考察.md",
+        "memory-system-doc/design-specification.md",
+        "memory-system-doc/usage-guide.md"
+      ],
+      "rrf_sources": [
+        "graphiti-note/左脳と右脳をつなぐ記憶システム_あおい視点.md",
+        "OneNote/AI/Vibecoding/メモリーMCP.md",
+        "aoi-ai-tech-blog-note/detailed-articles/chapter4-01-memory-system-characteristics.md",
+        "chatroom-note/obsidian-graphiti-serena-guide.md",
+        "aoi-ai-tech-blog-note/detailed-articles/chapter4-01-memory-system-characteristics.md"
+      ],
+      "rerank_sources": [
+        "chatroom-note/obsidian-graphiti-serena-guide.md",
+        "graphiti-note/左脳と右脳をつなぐ記憶システム_あおい視点.md",
+        "aoi-ai-tech-blog-note/gemini-mind-and-memory.md",
+        "aoi-ai-tech-blog-note/detailed-articles/chapter4-01-memory-system-characteristics.md",
+        "chatroom-note/obsidian-graphiti-serena-guide.md"
+      ],
+      "rrf_metrics": {
+        "hit_rate@1": 1,
+        "mrr@1": 1,
+        "precision@1": 1,
+        "recall@1": 0.2,
+        "hit_rate@3": 1,
+        "mrr@3": 1,
+        "precision@3": 0.3333333333333333,
+        "recall@3": 0.2,
+        "hit_rate@5": 1,
+        "mrr@5": 1,
+        "precision@5": 0.2,
+        "recall@5": 0.2
+      },
+      "rerank_metrics": {
+        "hit_rate@1": 0,
+        "mrr@1": 0,
+        "precision@1": 0,
+        "recall@1": 0,
+        "hit_rate@3": 1,
+        "mrr@3": 0.5,
+        "precision@3": 0.3333333333333333,
+        "recall@3": 0.2,
+        "hit_rate@5": 1,
+        "mrr@5": 0.5,
+        "precision@5": 0.2,
+        "recall@5": 0.2
+      }
+    },
+    {
+      "question": "CursorとClaude Code CLIでのGraphiti利用の違い",
+      "relevant_sources": [
+        "graphiti-note/cursor-graphiti-setup.md",
+        "graphiti-note/cursor-graphiti-mcp-integration.md",
+        "graphiti-note/claude_vs_cursor_memory_comparison.md",
+        "graphiti-doc/cursor-setup-guide.md"
+      ],
+      "rrf_sources": [
+        "graphiti-note/cursor-graphiti-setup.md",
+        "chatroom-doc/auto-claude-setting/auto-claude-japanese/ja/navigation.json",
+        "chatroom-note/graphiti-external-memory-setup.md",
+        "chatroom-doc/mcp/mcp-configuration-complete-guide.md",
+        "graphiti-note/cursor-graphiti-mcp-integration.md"
+      ],
+      "rerank_sources": [
+        "graphiti-note/cursor-graphiti-setup.md",
+        "graphiti-note/claude_vs_cursor_memory_comparison.md",
+        "graphiti-note/claude_vs_cursor_memory_comparison.md",
+        "chatroom-note/graphiti-external-memory-setup.md",
+        "graphiti-doc/cursor-setup-guide.md"
+      ],
+      "rrf_metrics": {
+        "hit_rate@1": 1,
+        "mrr@1": 1,
+        "precision@1": 1,
+        "recall@1": 0.25,
+        "hit_rate@3": 1,
+        "mrr@3": 1,
+        "precision@3": 0.3333333333333333,
+        "recall@3": 0.25,
+        "hit_rate@5": 1,
+        "mrr@5": 1,
+        "precision@5": 0.4,
+        "recall@5": 0.5
+      },
+      "rerank_metrics": {
+        "hit_rate@1": 1,
+        "mrr@1": 1,
+        "precision@1": 1,
+        "recall@1": 0.25,
+        "hit_rate@3": 1,
+        "mrr@3": 1,
+        "precision@3": 1,
+        "recall@3": 0.5,
+        "hit_rate@5": 1,
+        "mrr@5": 1,
+        "precision@5": 0.8,
+        "recall@5": 0.75
+      }
+    },
+    {
+      "question": "CLAUDE.mdの設計パターンと設定方法",
+      "relevant_sources": [
+        "writing-note/done/20260118-claudemd-skill.md",
+        "writing-note/claude-md-guide-series01.md",
+        "chatroom-note/claude-md-personality-effect.md",
+        "memory-system-note/claude-md-ambiguous-expression-elimination.md"
+      ],
+      "rrf_sources": [
+        "chatroom-note/absolute-rule-article.md",
+        "chatroom-note/claude-md-personality-effect.md",
+        "writing-note/claude-md-guide-series01.md",
+        "writing-note/claude-md-guide-series01.md",
+        "ai-create-doc/02_technical_design.md"
+      ],
+      "rerank_sources": [
+        "chatroom-note/claude-md-personality-effect.md",
+        "ai-create-doc/02_technical_design.md",
+        "chatroom-note/claude-md-personality-effect.md",
+        "writing-note/claude-md-guide-series01.md",
+        "aoi-ai-tech-blog-note/detailed-articles/chapter3-05-work-efficiency-optimization.md"
+      ],
+      "rrf_metrics": {
+        "hit_rate@1": 0,
+        "mrr@1": 0,
+        "precision@1": 0,
+        "recall@1": 0,
+        "hit_rate@3": 1,
+        "mrr@3": 0.5,
+        "precision@3": 0.6666666666666666,
+        "recall@3": 0.5,
+        "hit_rate@5": 1,
+        "mrr@5": 0.5,
+        "precision@5": 0.6,
+        "recall@5": 0.5
+      },
+      "rerank_metrics": {
+        "hit_rate@1": 1,
+        "mrr@1": 1,
+        "precision@1": 1,
+        "recall@1": 0.25,
+        "hit_rate@3": 1,
+        "mrr@3": 1,
+        "precision@3": 0.6666666666666666,
+        "recall@3": 0.25,
+        "hit_rate@5": 1,
+        "mrr@5": 1,
+        "precision@5": 0.6,
+        "recall@5": 0.5
+      }
+    },
+    {
+      "question": "ベクトル検索とキーワード検索の違いは何か",
+      "relevant_sources": [
+        "rag-ruri-30m-doc/bm25-hybrid-search.md",
+        "aoi-ai-tech-blog-note/detailed-articles/chapter3-02-hybrid-memory-search.md",
+        "aoi-ai-tech-blog-note/detailed-articles/chapter3-03-auto-memory-search.md",
+        "writing-note/done/20260228-obsidian-link-rag-hybrid.md"
+      ],
+      "rrf_sources": [
+        "rag-ruri-30m-doc/softmatcha2-integration-report.md",
+        "rag-ruri-30m-doc/rag-test-results.md",
+        "rag-ruri-30m-doc/bm25-hybrid-search.md",
+        "rag-ruri-30m-doc/spec.md",
+        "rag-ruri-30m-doc/bm25-hybrid-search.md"
+      ],
+      "rerank_sources": [
+        "clawdbod-note/done/20260205ai-bot-3nin-gurashi.md",
+        "rag-ruri-30m-doc/bm25-hybrid-search.md",
+        "graphiti-doc/memory-system/archive/記憶システム考察.md",
+        "rag-ruri-30m-doc/bm25-hybrid-search.md",
+        "rag-ruri-30m-doc/bm25-hybrid-search.md"
+      ],
+      "rrf_metrics": {
+        "hit_rate@1": 0,
+        "mrr@1": 0,
+        "precision@1": 0,
+        "recall@1": 0,
+        "hit_rate@3": 1,
+        "mrr@3": 0.3333333333333333,
+        "precision@3": 0.3333333333333333,
+        "recall@3": 0.25,
+        "hit_rate@5": 1,
+        "mrr@5": 0.3333333333333333,
+        "precision@5": 0.4,
+        "recall@5": 0.25
+      },
+      "rerank_metrics": {
+        "hit_rate@1": 0,
+        "mrr@1": 0,
+        "precision@1": 0,
+        "recall@1": 0,
+        "hit_rate@3": 1,
+        "mrr@3": 0.5,
+        "precision@3": 0.3333333333333333,
+        "recall@3": 0.25,
+        "hit_rate@5": 1,
+        "mrr@5": 0.5,
+        "precision@5": 0.6,
+        "recall@5": 0.25
+      }
+    },
+    {
+      "question": "100本アプリ開発チャレンジとは",
+      "relevant_sources": [
+        "100apps-note/001-kickoff-and-osero.md",
+        "100apps-note/app029-app038.md",
+        "100apps-note/app003-app011.md",
+        "100apps-doc/100_apps_spec_numbered.md"
+      ],
+      "rrf_sources": [
+        "100apps-doc/100_apps_spec_numbered.md",
+        "100apps-note/001-kickoff-and-osero.md",
+        "100apps-note/app020-app027.md",
+        "100apps-note/app003-app011.md",
+        "100apps-note/app014-app018.md"
+      ],
+      "rerank_sources": [
+        "100apps-note/app022-app025.md",
+        "100apps-note/app029-app038.md",
+        "100apps-note/app031-app041.md",
+        "100apps-note/app012-app015.md",
+        "100apps-note/app020-app027.md"
+      ],
+      "rrf_metrics": {
+        "hit_rate@1": 1,
+        "mrr@1": 1,
+        "precision@1": 1,
+        "recall@1": 0.25,
+        "hit_rate@3": 1,
+        "mrr@3": 1,
+        "precision@3": 0.6666666666666666,
+        "recall@3": 0.5,
+        "hit_rate@5": 1,
+        "mrr@5": 1,
+        "precision@5": 0.6,
+        "recall@5": 0.75
+      },
+      "rerank_metrics": {
+        "hit_rate@1": 0,
+        "mrr@1": 0,
+        "precision@1": 0,
+        "recall@1": 0,
+        "hit_rate@3": 1,
+        "mrr@3": 0.5,
+        "precision@3": 0.3333333333333333,
+        "recall@3": 0.25,
+        "hit_rate@5": 1,
+        "mrr@5": 0.5,
+        "precision@5": 0.2,
+        "recall@5": 0.25
+      }
+    },
+    {
+      "question": "Neo4jデータベースの接続設定はどうなっているか",
+      "relevant_sources": [
+        "graphiti-note_done/graphiti_knowledge_graph_setup_guide.md",
+        "graphiti-note_done/GraphitiとNeo4jとGemini 2.5＋AIで構築する次世代知識グラフシステム - AIに記憶を与える.md"
+      ],
+      "rrf_sources": [
+        "graphiti-doc/update-plan-v0.28.1.md",
+        "graphiti-note_done/graphiti_knowledge_graph_setup_guide.md",
+        "graphiti-note_done/GraphitiとNeo4jとGemini 2.5＋AIで構築する次世代知識グラフシステム - AIに記憶を与える.md",
+        "graphiti-note/cursor-graphiti-setup.md",
+        "graphiti-note/graphiti-mcp-initialization-fix.md"
+      ],
+      "rerank_sources": [
+        "graphiti-doc/graphiti-tools-test/comprehensive-test-guide.md",
+        "graphiti-note_done/graphiti_knowledge_graph_setup_guide.md",
+        "graphiti-note_done/GraphitiとNeo4jとGemini 2.5＋AIで構築する次世代知識グラフシステム - AIに記憶を与える.md",
+        "graphiti-note_done/GraphitiとNeo4jとGemini 2.5＋AIで構築する次世代知識グラフシステム - AIに記憶を与える.md",
+        "graphiti-note/graphiti-mcp-initialization-fix.md"
+      ],
+      "rrf_metrics": {
+        "hit_rate@1": 0,
+        "mrr@1": 0,
+        "precision@1": 0,
+        "recall@1": 0,
+        "hit_rate@3": 1,
+        "mrr@3": 0.5,
+        "precision@3": 0.6666666666666666,
+        "recall@3": 1,
+        "hit_rate@5": 1,
+        "mrr@5": 0.5,
+        "precision@5": 0.4,
+        "recall@5": 1
+      },
+      "rerank_metrics": {
+        "hit_rate@1": 0,
+        "mrr@1": 0,
+        "precision@1": 0,
+        "recall@1": 0,
+        "hit_rate@3": 1,
+        "mrr@3": 0.5,
+        "precision@3": 0.6666666666666666,
+        "recall@3": 1,
+        "hit_rate@5": 1,
+        "mrr@5": 0.5,
+        "precision@5": 0.6,
+        "recall@5": 1
+      }
+    },
+    {
+      "question": "Gemini APIをアプリ開発でどう活用しているか",
+      "relevant_sources": [
+        "100apps-note/app029-app038.md",
+        "100apps-note/app003-app011.md",
+        "aoi-ai-tech-blog-note/detailed-articles/chapter4-02-gemini-collaboration-engine.md",
+        "aoi-ai-tech-blog-note/detailed-articles/chapter1-03-gemini-characteristics.md",
+        "OneNote/AI/note記事ネタ/Claudecode（CLI）とGeminiCLIの協業.md"
+      ],
+      "rrf_sources": [
+        "wsl-vault/AI_model/Gemini/Gemini 3 デベロッパー ガイド.md",
+        "wsl-vault/AI_model/Gemini/Gemini 3.md",
+        "graphiti-note_done/GraphitiとNeo4jとGemini 2.5＋AIで構築する次世代知識グラフシステム - AIに記憶を与える.md",
+        "graphiti-note_done/graphiti_knowledge_graph_setup_guide.md",
+        "wsl-vault/AI_model/Gemini/Gemini 3 デベロッパー ガイド.md"
+      ],
+      "rerank_sources": [
+        "wsl-vault/AI_model/Gemini/Gemini 3 デベロッパー ガイド.md",
+        "chatroom-note/ai-memory-system-comparison.md",
+        "wsl-vault/AI_model/Gemini/Gemini 3 デベロッパー ガイド.md",
+        "wsl-vault/AI_model/Gemini/Gemini 3.md",
+        "chatroom-note/ai-memory-system-comparison.md"
+      ],
+      "rrf_metrics": {
+        "hit_rate@1": 0,
+        "mrr@1": 0,
+        "precision@1": 0,
+        "recall@1": 0,
+        "hit_rate@3": 0,
+        "mrr@3": 0,
+        "precision@3": 0,
+        "recall@3": 0,
+        "hit_rate@5": 0,
+        "mrr@5": 0,
+        "precision@5": 0,
+        "recall@5": 0
+      },
+      "rerank_metrics": {
+        "hit_rate@1": 0,
+        "mrr@1": 0,
+        "precision@1": 0,
+        "recall@1": 0,
+        "hit_rate@3": 0,
+        "mrr@3": 0,
+        "precision@3": 0,
+        "recall@3": 0,
+        "hit_rate@5": 0,
+        "mrr@5": 0,
+        "precision@5": 0,
+        "recall@5": 0
+      }
+    }
+  ]
+}

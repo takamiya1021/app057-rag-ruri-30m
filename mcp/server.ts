@@ -13,8 +13,10 @@ import {
   upsertSourceFile,
   getStaleOrDeletedSources,
   getAllChunks,
+  resetDatabase,
+  getSourceFilePaths,
 } from "../lib/rag/vectorStore";
-import { splitText, splitMarkdown } from "../lib/rag/chunker";
+import { chunkDocument, splitText } from "../lib/rag/chunker";
 import { loadDocument } from "../lib/rag/documentLoader";
 import {
   searchSoftMatcha,
@@ -25,6 +27,7 @@ import {
 } from "../lib/rag/softmatcha";
 import { addIndexedDir, getIndexedDirs } from "../lib/rag/config";
 import { isGdriveSyncEnabled, syncChanges } from "../lib/rag/gdriveSync";
+
 
 export function createServer(): McpServer {
   const server = new McpServer({
@@ -77,7 +80,7 @@ export function createServer(): McpServer {
               const doc = await loadDocument(filePath);
               const stat = await fs.stat(filePath);
               removeSource(source);
-              const textChunks = doc.format === "md" ? splitMarkdown(doc.text) : splitText(doc.text);
+              const textChunks = chunkDocument(doc.text, doc.format);
               if (textChunks.length === 0) continue;
               const embeddings = await generateEmbeddings(textChunks, "RETRIEVAL_DOCUMENT");
               const chunks = textChunks.map((text, i) => ({ text, source, chunkIndex: i }));
@@ -117,7 +120,7 @@ export function createServer(): McpServer {
         const stat = await fs.stat(resolvedPath);
 
         const textChunks =
-          doc.format === "md" ? splitMarkdown(doc.text) : splitText(doc.text);
+          chunkDocument(doc.text, doc.format);
 
         if (textChunks.length === 0) {
           return {
@@ -235,17 +238,24 @@ export function createServer(): McpServer {
         }
 
         // トリプルハイブリッド検索（RRF統合）
-        const results = hybridSearch(queryEmbedding, query, topK, softmatchaResults);
+        const rrfResults = hybridSearch(queryEmbedding, query, topK, softmatchaResults);
 
-        if (results.length === 0) {
+        if (rrfResults.length === 0) {
           return {
             content: [{ type: "text", text: "該当するドキュメントが見つかりませんでした" }],
           };
         }
 
+        const results = rrfResults;
+
+        // ソース名からフルパスを取得
+        const uniqueSources = [...new Set(results.map((r) => r.chunk.source))];
+        const sourcePathMap = getSourceFilePaths(uniqueSources);
+
         const formatted = results.map((r, i) => ({
           rank: i + 1,
           source: r.chunk.source,
+          filePath: sourcePathMap[r.chunk.source] || null,
           score: Math.round(r.score * 10000) / 10000,
           vectorRank: r.vectorRank,
           bm25Rank: r.bm25Rank,
@@ -350,7 +360,7 @@ export function createServer(): McpServer {
   // 全ファイルのチャンクを集約してからまとめてエンベディング生成（効率重視）
   server.tool(
     "add_directory",
-    "ディレクトリ内の対応ファイル(.md, .txt, .pdf, .json)を再帰的にインデックスする（upsert対応）。batchSizeでエンベディング生成のバッチサイズを調整可能。",
+    "ディレクトリ内の対応ファイル(.md, .txt, .pdf, .json, .csv, コード)を再帰的にインデックスする（upsert対応）。batchSizeでエンベディング生成のバッチサイズを調整可能。",
     {
       dirPath: z.string().describe("インデックスするディレクトリのパス"),
       batchSize: z.number().optional().default(50).describe("エンベディング生成のバッチサイズ（デフォルト50。メモリに余裕があれば100〜200に増やすと高速化）"),
@@ -361,7 +371,7 @@ export function createServer(): McpServer {
         .describe("スキップするディレクトリ名"),
     },
     async ({ dirPath, batchSize, skipDirs }) => {
-      const SUPPORTED_EXTS = new Set([".md", ".txt", ".pdf", ".json"]);
+      const SUPPORTED_EXTS = new Set([".md", ".txt", ".pdf", ".json", ".csv", ".ts", ".tsx", ".js", ".jsx", ".py", ".rs", ".go", ".java", ".c", ".cpp", ".h", ".rb", ".sh"]);
 
       // 再帰的にファイル収集（シンボリックリンク対応）
       async function collectFiles(dir: string): Promise<string[]> {
@@ -422,7 +432,7 @@ export function createServer(): McpServer {
             const relativePath = path.relative(dirPath, filePath);
 
             const textChunks =
-              doc.format === "md" ? splitMarkdown(doc.text) : splitText(doc.text);
+              chunkDocument(doc.text, doc.format);
 
             if (textChunks.length === 0) continue;
 
@@ -572,7 +582,7 @@ export function createServer(): McpServer {
             removeSource(source);
 
             const textChunks =
-              doc.format === "md" ? splitMarkdown(doc.text) : splitText(doc.text);
+              chunkDocument(doc.text, doc.format);
 
             if (textChunks.length === 0) {
               results.push(`スキップ: ${source}（テキストなし）`);
@@ -637,6 +647,32 @@ export function createServer(): McpServer {
             isError: true,
           };
         }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: "text", text: `エラー: ${message}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  // 10. データベースリセット（フォルダごと削除）
+  server.tool(
+    "reset_database",
+    "RAGデータベースを完全にリセットする。データディレクトリ（DB、config、SoftMatchaインデックス）をすべて削除する。実行後はMCPサーバーの再起動が必要。",
+    {
+      confirm: z.literal("YES").describe("誤操作防止。リセットするには 'YES' を指定"),
+    },
+    async ({ confirm }) => {
+      try {
+        const result = resetDatabase();
+        return {
+          content: [{
+            type: "text",
+            text: `データベースをリセットしました。削除ディレクトリ: ${result.deleted}\nMCPサーバーを再起動してください。`,
+          }],
+        };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         return {

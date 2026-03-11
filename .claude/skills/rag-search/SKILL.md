@@ -84,7 +84,7 @@ Google Drive上のファイルをRAGインデックスに登録する手順。
 
 1. **ファイルリスト取得**
    ```bash
-   gws drive files list --params '{"pageSize": 1000, "fields": "files(id,name,mimeType,size),nextPageToken"}' --page-all > /tmp/gdrive-dl/drive_all.json
+   gws drive files list --params '{"pageSize": 1000, "q": "trashed = false", "fields": "files(id,name,mimeType,size),nextPageToken"}' --page-all > /tmp/gdrive-dl/drive_all.json
    ```
 
 2. **DL対象フィルタリング** — 以下を除外:

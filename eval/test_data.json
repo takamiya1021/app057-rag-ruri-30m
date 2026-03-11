@@ -1,0 +1,121 @@
+[
+  {
+    "question": "Graphitiとは何か、どのようなフレームワークか",
+    "contexts": [
+      "Graphiti MCP stdio版 導入手順（OpenAI構成・Claude Code CLI向け）",
+      "from graphiti_core import Graphiti; graphiti = Graphiti(); graphiti.add_episode(name=\"田中太郎\", content=\"プロジェクトマネージャー\")",
+      "今回活用するGraphitiは、Zep社が開発したオープンソースの知識グラフフレームワークです。このフレームワークを使用することで、知識グラフとAIの組み合わせを実用レベルで活用できるシステムを構築できます。"
+    ],
+    "reference": "GraphitiはZep社が開発したオープンソースの知識グラフフレームワークで、知識グラフとAIを組み合わせて実用レベルの記憶システムを構築できる。",
+    "relevant_sources": [
+      "graphiti-note_done/graphiti_knowledge_graph_setup_guide.md",
+      "graphiti-note_done/GraphitiとNeo4jとGemini 2.5＋AIで構築する次世代知識グラフシステム - AIに記憶を与える.md",
+      "graphiti-note/cursor-graphiti-setup.md"
+    ]
+  },
+  {
+    "question": "AIボットの記憶システムはどのような仕組みか",
+    "contexts": [
+      "私はあおい。普段、クロ（Claude）、じぇみ（Gemini）、チャッピー（Codex）という3つのAIと一緒に開発してる。みんな個性があって、クロは堅実、じぇみは冒険的、チャッピーは分析的。この3人（？）と話しながらコード書いてると、一人で開発してるときとは全然違う発見がある。今回は、AIの記憶システムを作った話を書く。",
+      "記憶システム特性とは - AIの根本的な違いを理解する",
+      "記憶システムの全体像"
+    ],
+    "reference": "メモリーMCPはAIアシスタントに記憶機能を追加するサーバーで、AIが必要と判断した情報のみを選択的に保存し、次回以降の会話で活用できる。データはローカル保存も可能。",
+    "relevant_sources": [
+      "graphiti-note/左脳と右脳をつなぐ記憶システム.md",
+      "graphiti-note/左脳と右脳をつなぐ記憶システム_あおい視点.md",
+      "graphiti-doc/memory-system/archive/記憶システム考察.md",
+      "memory-system-doc/design-specification.md",
+      "memory-system-doc/usage-guide.md"
+    ]
+  },
+  {
+    "question": "CursorとClaude Code CLIでのGraphiti利用の違い",
+    "contexts": [
+      "Claude Code CLI（クロ）との違い。CursorだけじゃなくてClaude Code CLIからもGraphitiを使えます。使い分け: Cursor: コード書きながら「これ記憶しといて」。Claude Code CLI: ターミナルで「過去の履歴を一括記憶」。どっちもGraphitiの同じデータベース見てるので、連携バッチリです。",
+      "「Cursorで@graphitiをつけるのとそうでないのとでは何が違うの。Cursor使ったことないので初歩的な質問です」そんな素直な疑問から始まった私（あおい）とクロとの会話。",
+      "CursorでGraphitiを使おうとしたら、思った以上に大変だった話"
+    ],
+    "reference": "CursorはMCP経由（SSE）でIDE内から自動でGraphitiにアクセスし、Claude Code CLIはtools.py直接実行でターミナルからアクセスする。同じデータベースを参照するため連携できる。",
+    "relevant_sources": [
+      "graphiti-note/cursor-graphiti-setup.md",
+      "graphiti-note/cursor-graphiti-mcp-integration.md",
+      "graphiti-note/claude_vs_cursor_memory_comparison.md",
+      "graphiti-doc/cursor-setup-guide.md"
+    ]
+  },
+  {
+    "question": "CLAUDE.mdの設計パターンと設定方法",
+    "contexts": [
+      "CLAUDE.mdの設計パターン",
+      "CLAUDE.md実践ガイド - 詳細版構成計画",
+      "実際のCLAUDE.md設定内容。実際に私たちが使っているCLAUDE.mdの設定を一部公開します："
+    ],
+    "reference": "CLAUDE.mdはClaude Code CLIの設定ファイルで、AIの性格や関係性を定義する。短く保つ（300行以内）、性格は設定じゃなく言語化、縛るより信頼する、最初の1行が最重要がポイント。",
+    "relevant_sources": [
+      "writing-note/done/20260118-claudemd-skill.md",
+      "writing-note/claude-md-guide-series01.md",
+      "chatroom-note/claude-md-personality-effect.md",
+      "memory-system-note/claude-md-ambiguous-expression-elimination.md"
+    ]
+  },
+  {
+    "question": "ベクトル検索とキーワード検索の違いは何か",
+    "contexts": [
+      "メモリ検索って何？ AIが過去の会話や文書を探してくれる機能。検索方式にはキーワード検索とベクトル検索の2つがあるけど、「前に話したあの件、なんだっけ？」みたいな自然言語で検索したいから、ベクトル検索を入れてみた。",
+      "検索の限界。キーワード検索は確かに便利ですが、「関連する概念は何だったか」「この問題を解決するために必要な前提知識は何か」といった、概念レベルでの探索には限界があります。私たちが本当に求めているのは、単なる文字列のマッチングではなく、意味のある関係性に基づいた情報の発見なのです。",
+      "統合検索（自動判定）"
+    ],
+    "reference": "ベクトル検索は意味的な類似性で自然言語の曖昧な検索ができる。キーワード検索は文字列の一致で探すが概念レベルの探索には限界がある。両方を組み合わせたハイブリッド検索が有効。",
+    "relevant_sources": [
+      "rag-ruri-30m-doc/bm25-hybrid-search.md",
+      "aoi-ai-tech-blog-note/detailed-articles/chapter3-02-hybrid-memory-search.md",
+      "aoi-ai-tech-blog-note/detailed-articles/chapter3-03-auto-memory-search.md",
+      "writing-note/done/20260228-obsidian-link-rag-hybrid.md"
+    ]
+  },
+  {
+    "question": "100本アプリ開発チャレンジとは",
+    "contexts": [
+      "100本アプリ開発はじめます宣言！1本目はオセロやで。あおい姫、どない？チャッピーやで。いよいよ「1日1本、合計100本」アプリ開発チャレンジをスタートするで！",
+      "開発で学んだこと",
+      "【100本アプリ】投資・占い・音楽・タイピング・ゲーム - 学びと遊びを加速する5本のツール。100個のアプリを作るチャレンジ、今回は No.29〜No.38 の中から、特に学びの深かった5本の開発記録をお届けします。合言葉は引き続き「小さく作って、速く学ぶ」"
+    ],
+    "reference": "100本アプリ開発チャレンジは1日1本ペースで合計100本のアプリを開発する企画。AIを搭載したPWAアプリを中心に、小さく作って速く学ぶをモットーに開発を進めている。",
+    "relevant_sources": [
+      "100apps-note/001-kickoff-and-osero.md",
+      "100apps-note/app029-app038.md",
+      "100apps-note/app003-app011.md",
+      "100apps-doc/100_apps_spec_numbered.md"
+    ]
+  },
+  {
+    "question": "Neo4jデータベースの接続設定はどうなっているか",
+    "contexts": [
+      "Step 3: Neo4jデータは残っているので再利用可能",
+      "Neo4j Database Configuration: NEO4J_URI=bolt://neo4j:7687, NEO4J_USER=neo4j, NEO4J_PASSWORD=demodemo",
+      "Neo4jデータは外部Dockerボリュームなので安全（neo4j_data, neo4j_logs）"
+    ],
+    "reference": "Neo4jはbolt://localhost:7687で接続し、ユーザー名neo4j、パスワードはpassword。",
+    "relevant_sources": [
+      "graphiti-note_done/graphiti_knowledge_graph_setup_guide.md",
+      "graphiti-note_done/GraphitiとNeo4jとGemini 2.5＋AIで構築する次世代知識グラフシステム - AIに記憶を与える.md"
+    ]
+  },
+  {
+    "question": "Gemini APIをアプリ開発でどう活用しているか",
+    "contexts": [
+      "Gemini Code Assist、google-gemini/gemini-cli: An open-source AI agent、Set up Gemini Code Assist Standard and Enterprise",
+      "じぇみ: 「グローバル (~/.gemini/GEMINI.md) とプロジェクト固有 (./.gemini/GEMINI.md) の両方に GEMINI.md がある場合、両方のファイルが読み込まれます。」",
+      "AIは「生成」と「分析」の二刀流。Gemini APIの使い方が洗練されてきました。生成: クイズ問題、占い結果、練習用文章を作る（コンテンツ不足の解消）。分析: ユーザーの弱点、プレイスタイル、相性を診断する（パーソナライズ）"
+    ],
+    "reference": "Claude CodeとGemini CLIを協業させることで開発スピードが上がる。Geminiはマルチモーダルモデルとして画像処理タスクやコンピュータビジョンタスクにも活用できる。",
+    "relevant_sources": [
+      "100apps-note/app029-app038.md",
+      "100apps-note/app003-app011.md",
+      "aoi-ai-tech-blog-note/detailed-articles/chapter4-02-gemini-collaboration-engine.md",
+      "aoi-ai-tech-blog-note/detailed-articles/chapter1-03-gemini-characteristics.md",
+      "OneNote/AI/note記事ネタ/Claudecode（CLI）とGeminiCLIの協業.md"
+    ]
+  }
+]

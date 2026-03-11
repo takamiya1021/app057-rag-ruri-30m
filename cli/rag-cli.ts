@@ -12,7 +12,7 @@ import {
   getAllChunks,
 } from "../lib/rag/vectorStore";
 import { loadDocument } from "../lib/rag/documentLoader";
-import { splitText, splitMarkdown } from "../lib/rag/chunker";
+import { chunkDocument } from "../lib/rag/chunker";
 import {
   buildSoftMatchaIndex,
   searchSoftMatcha,
@@ -24,6 +24,7 @@ import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { promises as fs } from "fs";
 import * as path from "path";
 import { addIndexedDir } from "../lib/rag/config";
+
 
 const SYSTEM_PROMPT = `あなたは親切なナレッジベースアシスタントです。
 以下の参照情報を基に、ユーザーの質問に日本語で回答してください。
@@ -96,7 +97,7 @@ async function add(filePath: string) {
   const doc = await loadDocument(filePath);
 
   const chunks =
-    doc.format === "md" ? splitMarkdown(doc.text) : splitText(doc.text);
+    chunkDocument(doc.text, doc.format);
 
   if (chunks.length === 0) {
     console.error("テキストが空です");
@@ -148,7 +149,7 @@ function remove(source: string) {
 
 /** ディレクトリ一括登録（MCPを通さず直接DB書き込み） */
 async function addDir(dirPath: string, batchSize: number) {
-  const SUPPORTED_EXTS = new Set([".md", ".txt", ".pdf", ".json"]);
+  const SUPPORTED_EXTS = new Set([".md", ".txt", ".pdf", ".json", ".csv", ".ts", ".tsx", ".js", ".jsx", ".py", ".rs", ".go", ".java", ".c", ".cpp", ".h", ".rb", ".sh"]);
   const SKIP_DIRS = new Set([".git", ".obsidian", "node_modules", "Excalidraw", ".claude"]);
 
   // 再帰的にファイル収集
@@ -205,12 +206,14 @@ async function addDir(dirPath: string, batchSize: number) {
   for (const filePath of files) {
     try {
       const doc = await loadDocument(filePath);
+      // 中身がないファイルはスキップ（GDriveと同じ基準）
+      if (!doc.text || doc.text.trim().length < 50) continue;
       const resolvedFilePath = path.resolve(filePath);
       const fileStat = await fs.stat(resolvedFilePath);
       const relativePath = path.relative(resolvedDir, filePath);
 
       const textChunks =
-        doc.format === "md" ? splitMarkdown(doc.text) : splitText(doc.text);
+        chunkDocument(doc.text, doc.format);
 
       if (textChunks.length === 0) continue;
 
@@ -288,19 +291,22 @@ async function searchOnly(query: string, topK: number) {
     }
   }
 
-  const results = hybridSearch(queryEmbedding, query, topK, softmatchaResults);
+  // トリプルハイブリッド検索（RRF統合）
+  const rrfResults = hybridSearch(queryEmbedding, query, topK, softmatchaResults);
 
-  if (results.length === 0) {
+  if (rrfResults.length === 0) {
     console.log("該当するドキュメントが見つかりませんでした");
     return;
   }
+
+  const results = rrfResults;
 
   results.forEach((r, i) => {
     const ranks = [];
     if (r.vectorRank !== null) ranks.push(`Vec:${r.vectorRank}`);
     if (r.bm25Rank !== null) ranks.push(`BM25:${r.bm25Rank}`);
     if (r.softmatchaRank !== null) ranks.push(`SM:${r.softmatchaRank}`);
-    console.log(`\n[${i + 1}] ${r.chunk.source} (スコア: ${r.score.toFixed(4)}, ${ranks.join(", ")})`);
+    console.log(`\n[${i + 1}] ${r.chunk.source} (RRF: ${r.score.toFixed(4)}, ${ranks.join(", ")})`);
     console.log(r.chunk.text.slice(0, 200));
   });
 }
@@ -377,7 +383,7 @@ async function syncUpdates() {
       removeSource(source);
 
       const textChunks =
-        doc.format === "md" ? splitMarkdown(doc.text) : splitText(doc.text);
+        chunkDocument(doc.text, doc.format);
 
       if (textChunks.length === 0) {
         console.log(`スキップ: ${source}（テキストなし）`);

@@ -39,6 +39,22 @@ export async function loadDocument(filePath: string): Promise<LoadedDocument> {
       const text = await fs.readFile(filePath, "utf-8");
       return { text, source, format: "csv" };
     }
+    case ".ts":
+    case ".tsx":
+    case ".js":
+    case ".jsx":
+    case ".py":
+    case ".rs":
+    case ".go":
+    case ".java":
+    case ".c":
+    case ".cpp":
+    case ".h":
+    case ".rb":
+    case ".sh": {
+      const text = await fs.readFile(filePath, "utf-8");
+      return { text, source, format: "code" };
+    }
     default:
       throw new Error(`Unsupported file format: ${ext}`);
   }
