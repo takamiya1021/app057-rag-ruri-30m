@@ -43,7 +43,7 @@ function splitLongParagraph(text: string, chunkSize: number): string[] {
 export function splitText(
   text: string,
   chunkSize: number = 500,
-  overlap: number = 50
+  overlap: number = 200
 ): string[] {
   const paragraphs = text.split(/\n\n+/);
   const chunks: string[] = [];

@@ -17,6 +17,16 @@ import { removeSource, addChunks, upsertSourceFile } from "./vectorStore";
 import { loadDocument } from "./documentLoader";
 import { chunkDocument } from "./chunker";
 import { generateEmbeddings } from "./embedding";
+import {
+  generateGeminiMultimodalEmbedding,
+  generateGeminiEmbeddings,
+} from "./geminiEmbedding";
+import {
+  isMediaFile,
+  isPdfFile,
+  chunkMediaFile,
+  type MediaChunk,
+} from "./multimodal";
 
 const GWS = "gws";
 const DL_DIR = "/tmp/gdrive-sync/files";
@@ -29,16 +39,36 @@ const EXPORT_MIME_MAP: Record<string, { exportMime: string; ext: string }> = {
   "application/vnd.google-apps.presentation": { exportMime: "text/plain", ext: ".txt" },
 };
 
-// バイナリ/テキスト形式: そのままDL（PDFは除外: 請求書・領収書等が多くノイズになる）
+// バイナリ/テキスト形式: そのままDL
 const DIRECT_DL_MIME_MAP: Record<string, string> = {
+  // テキスト
   "text/plain": ".txt",
   "text/markdown": ".md",
   "text/csv": ".csv",
   "application/json": ".json",
+  // ドキュメント
+  "application/pdf": ".pdf",
+  // 画像
+  "image/png": ".png",
+  "image/jpeg": ".jpg",
+  "image/webp": ".webp",
+  "image/bmp": ".bmp",
+  // 動画
+  "video/mp4": ".mp4",
+  "video/mpeg": ".mpeg",
+  "video/quicktime": ".mov",
+  "video/x-msvideo": ".avi",
+  "video/x-flv": ".flv",
+  "video/webm": ".webm",
+  "video/x-ms-wmv": ".wmv",
+  "video/3gpp": ".3gp",
+  // 音声
+  "audio/mpeg": ".mp3",
+  "audio/wav": ".wav",
 };
 
-// ファイルサイズ上限（10MB）
-const MAX_FILE_SIZE = 10 * 1024 * 1024;
+// ファイルサイズ上限（100MB: Gemini APIのインラインデータ上限に合わせる）
+const MAX_FILE_SIZE = 100 * 1024 * 1024;
 
 interface DriveChange {
   fileId: string;
@@ -209,7 +239,7 @@ export async function syncChanges(): Promise<{
     }
   }
 
-  // DL → インデックス（1件ずつ順次）
+  // DL → インデックス（1件ずつ順次、indexFileで自動判定）
   let dlCount = 0;
   let indexCount = 0;
   let errorCount = 0;
@@ -229,27 +259,11 @@ export async function syncChanges(): Promise<{
     }
     dlCount++;
 
-    try {
-      const doc = await loadDocument(dlPath);
-      const textChunks = chunkDocument(doc.text, doc.format);
-      if (textChunks.length === 0) continue;
-
-      removeSource(doc.source);
-      const embeddings = await generateEmbeddings(textChunks, "RETRIEVAL_DOCUMENT");
-      const chunks = textChunks.map((text, i) => ({
-        text,
-        source: doc.source,
-        chunkIndex: i,
-      }));
-      addChunks(chunks, embeddings);
-
-      const stat = fs.statSync(dlPath);
-      upsertSourceFile(doc.source, dlPath, stat.mtimeMs);
+    const ok = await indexFile(dlPath, file.name);
+    if (ok) {
       indexCount++;
-    } catch (e) {
+    } else {
       errorCount++;
-      const msg = e instanceof Error ? e.message : String(e);
-      console.error(`[gdrive-sync] インデックスエラー: ${file.name} — ${msg}`);
     }
   }
 
@@ -351,8 +365,67 @@ async function downloadFileAsync(fileId: string, name: string, mimeType: string)
   }
 }
 
+/** メディア/PDFファイルをGemini Embedding 2でインデックス */
+async function indexMediaFile(
+  dlPath: string,
+  fileName: string,
+  apiKey: string,
+  gdriveFileId?: string,
+): Promise<boolean> {
+  try {
+    const mediaChunks: MediaChunk[] = await chunkMediaFile(dlPath);
+    if (mediaChunks.length === 0) return false;
+
+    removeSource(fileName);
+
+    // 各チャンクを1件ずつGemini Embedding 2でベクトル化
+    const embeddings: number[][] = [];
+    for (const chunk of mediaChunks) {
+      const embedding = await generateGeminiMultimodalEmbedding(
+        chunk.part,
+        apiKey,
+        { taskType: "RETRIEVAL_DOCUMENT" },
+      );
+      embeddings.push(embedding);
+    }
+
+    const chunks = mediaChunks.map((mc, j) => ({
+      text: mc.label, // ラベルをchunk_textに保存（検索表示用）
+      source: fileName,
+      chunkIndex: j,
+      metadata: { type: "multimodal" },
+    }));
+    addChunks(chunks, embeddings);
+
+    if (gdriveFileId) {
+      upsertSourceFile(fileName, `gdrive://${gdriveFileId}`, Date.now());
+    } else {
+      const stat = fs.statSync(dlPath);
+      upsertSourceFile(fileName, dlPath, stat.mtimeMs);
+    }
+    return true;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error(`[gdrive-bulk] マルチモーダルインデックスエラー: ${fileName} — ${msg}`);
+    return false;
+  }
+}
+
 /** 1件のインデックス処理（テキスト抽出→エンベディング→DB保存） */
 async function indexFile(dlPath: string, fileName: string, gdriveFileId?: string): Promise<boolean> {
+  const ext = path.extname(dlPath).toLowerCase();
+
+  // メディアファイル or PDFはGemini Embedding 2でマルチモーダル処理
+  if (isMediaFile(ext) || isPdfFile(ext)) {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      console.error(`[gdrive-bulk] GEMINI_API_KEY未設定: マルチモーダルファイルをスキップ — ${fileName}`);
+      return false;
+    }
+    return indexMediaFile(dlPath, fileName, apiKey, gdriveFileId);
+  }
+
+  // テキスト系は従来のruri-v3-30mで処理
   try {
     const doc = await loadDocument(dlPath);
     // 空 or ほぼ無意味なテキストはスキップ（50文字未満）

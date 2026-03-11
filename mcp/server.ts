@@ -27,6 +27,14 @@ import {
 } from "../lib/rag/softmatcha";
 import { addIndexedDir, getIndexedDirs } from "../lib/rag/config";
 import { isGdriveSyncEnabled, syncChanges } from "../lib/rag/gdriveSync";
+import {
+  generateGeminiEmbedding,
+  generateGeminiEmbeddings,
+  GEMINI_EMBEDDING_DIMENSIONS,
+} from "../lib/rag/geminiEmbedding";
+import Database from "better-sqlite3";
+import * as sqliteVec from "sqlite-vec";
+import * as os from "os";
 
 
 export function createServer(): McpServer {
@@ -41,8 +49,10 @@ export function createServer(): McpServer {
   // --- 検索時バックグラウンド更新 ---
   // 最終チェック時刻を記録（検索のたびにチェックしないようにする）
   let lastUpdateCheckMs = 0;
+  let lastGeminiUpdateCheckMs = 0;
   const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1時間
   let updateRunning = false;
+  let geminiUpdateRunning = false;
   let softmatchaStaleNotified = false; // 24時間超過通知済みフラグ（1回だけ通知）
 
   /** 検索時にバックグラウンドで更新チェック+更新を実行（検索をブロックしない） */
@@ -99,6 +109,121 @@ export function createServer(): McpServer {
         console.error(`[auto-update] エラー: ${e}`);
       } finally {
         updateRunning = false;
+      }
+    })();
+  }
+
+  /** Gemini検索時にバックグラウンドで更新チェック+更新を実行（検索をブロックしない） */
+  function triggerGeminiBackgroundUpdate(): void {
+    const now = Date.now();
+    if (geminiUpdateRunning || now - lastGeminiUpdateCheckMs < UPDATE_CHECK_INTERVAL_MS) return;
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) return;
+    if (!require("fs").existsSync(geminiDbPath)) return;
+
+    lastGeminiUpdateCheckMs = now;
+    geminiUpdateRunning = true;
+
+    (async () => {
+      try {
+        const gdb = new Database(geminiDbPath);
+        sqliteVec.load(gdb);
+        const rows = gdb.prepare("SELECT source, file_path, mtime_ms FROM source_files").all() as Array<{
+          source: string;
+          file_path: string;
+          mtime_ms: number;
+        }>;
+
+        const stale: Array<{ source: string; filePath: string }> = [];
+        const deleted: string[] = [];
+
+        for (const row of rows) {
+          try {
+            const stat = require("fs").statSync(row.file_path);
+            if (stat.mtimeMs > row.mtime_ms) {
+              stale.push({ source: row.source, filePath: row.file_path });
+            }
+          } catch {
+            deleted.push(row.source);
+          }
+        }
+
+        if (stale.length > 0 || deleted.length > 0) {
+          console.error(`[auto-update] Gemini差分更新開始（更新: ${stale.length}, 削除: ${deleted.length}）`);
+
+          // 削除
+          for (const source of deleted) {
+            const chunkRows = gdb.prepare("SELECT id FROM chunks WHERE source = ?").all(source) as Array<{ id: number }>;
+            for (const r of chunkRows) {
+              gdb.prepare("DELETE FROM vec_chunks WHERE rowid = ?").run(r.id);
+            }
+            gdb.prepare("DELETE FROM chunks WHERE source = ?").run(source);
+            gdb.prepare("DELETE FROM source_files WHERE source = ?").run(source);
+          }
+
+          // 更新
+          for (const { source, filePath } of stale) {
+            try {
+              const doc = await loadDocument(filePath);
+              const stat = await fs.stat(filePath);
+
+              // 古いチャンクを削除
+              const oldChunks = gdb.prepare("SELECT id FROM chunks WHERE source = ?").all(source) as Array<{ id: number }>;
+              for (const r of oldChunks) {
+                gdb.prepare("DELETE FROM vec_chunks WHERE rowid = ?").run(r.id);
+              }
+              gdb.prepare("DELETE FROM chunks WHERE source = ?").run(source);
+              gdb.prepare("DELETE FROM source_files WHERE source = ?").run(source);
+
+              const textChunks = chunkDocument(doc.text, doc.format);
+              if (textChunks.length === 0) continue;
+
+              // Gemini APIでエンベディング生成（バッチ100件ずつ）
+              const insertChunk = gdb.prepare("INSERT INTO chunks (source, chunk_text, chunk_index) VALUES (?, ?, ?)");
+              const insertVec = gdb.prepare("INSERT INTO vec_chunks (rowid, embedding) VALUES (?, ?)");
+              const BATCH_SIZE = 100;
+
+              for (let i = 0; i < textChunks.length; i += BATCH_SIZE) {
+                const batchTexts = textChunks.slice(i, i + BATCH_SIZE);
+                const embeddings = await generateGeminiEmbeddings(batchTexts, apiKey, {
+                  taskType: "RETRIEVAL_DOCUMENT",
+                });
+                const transaction = gdb.transaction(() => {
+                  for (let j = 0; j < batchTexts.length; j++) {
+                    const result = insertChunk.run(source, batchTexts[j], i + j);
+                    const rowid = BigInt(result.lastInsertRowid);
+                    insertVec.run(rowid, Buffer.from(new Float32Array(embeddings[j]).buffer));
+                  }
+                });
+                transaction();
+
+                // レート制限対策
+                if (i + BATCH_SIZE < textChunks.length) {
+                  await new Promise((resolve) => setTimeout(resolve, 1_000));
+                }
+              }
+
+              gdb.prepare(`
+                INSERT INTO source_files (source, file_path, mtime_ms)
+                VALUES (?, ?, ?)
+                ON CONFLICT(source) DO UPDATE SET
+                  file_path = excluded.file_path,
+                  mtime_ms = excluded.mtime_ms,
+                  indexed_at = datetime('now')
+              `).run(source, filePath, stat.mtimeMs);
+            } catch (e) {
+              console.error(`[auto-update] Gemini ${source}: ${e}`);
+            }
+          }
+          console.error("[auto-update] Gemini差分更新完了");
+        }
+
+        gdb.close();
+      } catch (e) {
+        console.error(`[auto-update] Geminiエラー: ${e}`);
+      } finally {
+        geminiUpdateRunning = false;
       }
     })();
   }
@@ -205,15 +330,93 @@ export function createServer(): McpServer {
   );
 
   // 3. トリプルハイブリッド検索（ベクトル + BM25 + SoftMatchaソフトパターンマッチ）
+  // Gemini Embedding 2 DBパス
+  const geminiDbPath = path.join(os.homedir(), ".local/share/rag-mcp-ruri-30m/rag-gemini-embedding-2-preview.db");
+
+  /** Gemini DBで検索 */
+  function searchGeminiIndex(queryEmbedding: number[], topK: number): Array<{ source: string; text: string; distance: number }> {
+    const gdb = new Database(geminiDbPath, { readonly: true });
+    sqliteVec.load(gdb);
+    const rows = gdb
+      .prepare("SELECT rowid, distance FROM vec_chunks WHERE embedding MATCH ? ORDER BY distance LIMIT ?")
+      .all(Buffer.from(new Float32Array(queryEmbedding).buffer), topK) as Array<{ rowid: number; distance: number }>;
+
+    const results: Array<{ source: string; text: string; distance: number }> = [];
+    const getChunk = gdb.prepare("SELECT source, chunk_text FROM chunks WHERE id = ?");
+    for (const row of rows) {
+      const chunk = getChunk.get(row.rowid) as { source: string; chunk_text: string } | undefined;
+      if (chunk) {
+        results.push({ source: chunk.source, text: chunk.chunk_text, distance: row.distance });
+      }
+    }
+    gdb.close();
+    return results;
+  }
+
   server.tool(
     "search",
-    "RAGインデックスをトリプルハイブリッド検索（ベクトル + BM25 + ソフトパターンマッチ）し、関連するチャンクを返す",
+    "RAGインデックスを検索し、関連するチャンクを返す。engine未指定時はトリプルハイブリッド検索（ベクトル+BM25+ソフトパターンマッチ）、engine='gemini'でGemini Embedding 2による意味検索",
     {
       query: z.string().describe("検索クエリ"),
       topK: z.number().optional().default(5).describe("返す結果の最大数"),
+      engine: z.enum(["ruri", "gemini"]).optional().default("ruri").describe("検索エンジン: ruri（デフォルト）またはgemini"),
     },
-    async ({ query, topK }) => {
+    async ({ query, topK, engine }) => {
       try {
+        // === Gemini Embedding 2 検索 ===
+        if (engine === "gemini") {
+          const apiKey = process.env.GEMINI_API_KEY;
+          if (!apiKey) {
+            return {
+              content: [{ type: "text", text: "エラー: GEMINI_API_KEY が設定されていません" }],
+              isError: true,
+            };
+          }
+          if (!require("fs").existsSync(geminiDbPath)) {
+            return {
+              content: [{ type: "text", text: "エラー: Gemini Embedding インデックスが未構築です。CLI で build-gemini-index を実行してください。" }],
+              isError: true,
+            };
+          }
+
+          // バックグラウンドで更新チェック（検索をブロックしない）
+          triggerGeminiBackgroundUpdate();
+
+          const queryEmb = await generateGeminiEmbedding(query, apiKey, {
+            taskType: "RETRIEVAL_QUERY",
+          });
+          const geminiResults = searchGeminiIndex(queryEmb, topK);
+
+          if (geminiResults.length === 0) {
+            return {
+              content: [{ type: "text", text: "該当するドキュメントが見つかりませんでした" }],
+            };
+          }
+
+          // ソース名からフルパスを取得
+          const uniqueSources = [...new Set(geminiResults.map((r) => r.source))];
+          const sourcePathMap = getSourceFilePaths(uniqueSources);
+
+          const formatted = geminiResults.map((r, i) => ({
+            rank: i + 1,
+            source: r.source,
+            filePath: sourcePathMap[r.source] || null,
+            distance: Math.round(r.distance * 10000) / 10000,
+            engine: "gemini-embedding-2-preview",
+            text: r.text,
+          }));
+
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(formatted, null, 2),
+              },
+            ],
+          };
+        }
+
+        // === 通常のruri検索 ===
         // バックグラウンドで更新チェック（検索をブロックしない）
         triggerBackgroundUpdate();
 
